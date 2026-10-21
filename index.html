@@ -1995,9 +1995,19 @@ header .winner-title-line h1{display:flex!important;align-items:center!important
                     });
                     const virtualCanvas={width:canvases[0].ocrMeta.sourceWidth,height:canvases[0].ocrMeta.sourceHeight};
                     const text=normalized.map(w=>w.text).join(' ');
+                    // Reconstruct once through the validated rank/table path, then hand off the exact
+                    // selected-row values from that same dataset. This prevents a second reconstruction
+                    // from overwriting the successful selected row before the form is populated.
                     const ranks=this.extractTerritoryDashboardRanks({words:normalized},virtualCanvas);
-                    const values=this.extractTerritoryDashboardMetrics({words:normalized},virtualCanvas);
-                    const count=['dailySls','dailyGals','mtdSls','mtdGals'].filter(k=>Number.isFinite(values?.[k])).length;
+                    const selected=this.rankDiagnostic?.selected||this.fullTableDiagnostic?.selected||null;
+                    const values=selected?{
+                        dailySls:selected.dailySls,mtdSls:selected.mtdSls,
+                        dailyGals:selected.dailyGals,mtdGals:selected.mtdGals
+                    }:{};
+                    const valuesValid=['dailySls','mtdSls','dailyGals','mtdGals'].every(k=>Number.isFinite(values[k]))&&
+                        values.mtdSls>=values.dailySls&&values.mtdGals>=values.dailyGals;
+                    if(!valuesValid){Object.keys(values).forEach(k=>delete values[k]);}
+                    const count=['dailySls','dailyGals','mtdSls','mtdGals'].filter(k=>Number.isFinite(values[k])).length;
                     const rankCount=['dailySales','mtdSales','dailyGals','mtdGals'].filter(k=>Number.isFinite(ranks?.[k])).length;
                     best={count,text,values:values||{},ranks:rankCount===4?ranks:null,
                         rankDiagnostic:this.rankDiagnostic?structuredClone(this.rankDiagnostic):null};
@@ -2005,7 +2015,6 @@ header .winner-title-line h1{display:flex!important;align-items:center!important
                         lowestY:normalized.length?Math.max(...normalized.map(w=>w.bbox.y1)):null,
                         lastWords:normalized.slice().sort((a,b)=>a.bbox.y0-b.bbox.y0).slice(-100).map(w=>w.text)};
                     if (best.rankDiagnostic) this.rankDiagnostic = best.rankDiagnostic;
-                    this.showFullTableReview();
                     if (rawText) rawText.textContent = best.text || 'OCR completed but returned no readable text.';
                     details?.classList.remove('hidden');
                     if (best.ranks) {
@@ -2020,13 +2029,13 @@ header .winner-title-line h1{display:flex!important;align-items:center!important
                     // Clear stale values first, then dispatch input/change so the existing form state
                     // receives exactly the same updates as a manual entry.
                     Object.values(fields).forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
-                    Object.entries(fields).forEach(([key,id]) => {
-                        const el=document.getElementById(id);
-                        if(el&&Number.isFinite(best.values[key])){
-                            el.value=String(best.values[key]);
-                            el.dispatchEvent(new Event('input',{bubbles:true}));
-                            el.dispatchEvent(new Event('change',{bubbles:true}));
-                        }
+                    Object.entries(fields).forEach(([key,id])=>{
+                        const el=document.getElementById(id),value=best.values[key];
+                        if(!el||!Number.isFinite(value))return;
+                        const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')?.set;
+                        if(setter)setter.call(el,String(value));else el.value=String(value);
+                        el.dispatchEvent(new Event('input',{bubbles:true}));
+                        el.dispatchEvent(new Event('change',{bubbles:true}));
                     });
                     updateProgress(best.count ? `OCR complete: ${best.count} of 4 values found. Verify before saving.` : 'OCR completed but no matching row values were found.', 1);
                     this.showToast(best.count === 4 ? 'All four metrics extracted. Verify before saving.' : `OCR found ${best.count} of 4 metrics. Review the fields.`, best.count === 4 ? 'success' : 'error');
@@ -2261,21 +2270,6 @@ header .winner-title-line h1{display:flex!important;align-items:center!important
                     result,rows:rows.map((r,index)=>({index:index+1,label:r.label,dailySls:r.dailySls,mtdSls:r.mtdSls,dailyGals:r.dailyGals,mtdGals:r.mtdGals}))};
                 console.log('Validated full-table territory OCR',{selected:selected.label,result,rows});
                 return result;
-            }
-
-            showFullTableReview() {
-                const prior=document.getElementById('fullTableOcrReview');if(prior)prior.remove();
-                const d=this.fullTableDiagnostic||{status:'no-table-result',rows:[]};
-                const fmt=v=>Number.isFinite(v)?Number(v).toLocaleString():'MISSING';
-                const rows=(d.rows&&d.rows.length?d.rows:(d.rawRows||[]));
-                const selected=d.selected;
-                const overlay=document.createElement('div');overlay.id='fullTableOcrReview';
-                overlay.style.cssText='position:fixed;inset:0;z-index:2147483647;background:rgba(2,6,23,.9);display:flex;align-items:center;justify-content:center;padding:12px;';
-                const body=rows.map((r,i)=>`<tr style="${selected===r?'background:#164e63;':''}${!r.valid&&d.status!=='row-count'?'background:#591c24;':''}"><td>${i+1}</td><td>${Number.isFinite(r.y)?r.y.toFixed(1):'—'}</td><td style="text-align:left">${String(r.label||'NO LABEL').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}</td><td>${fmt(r.dailySls)}</td><td>${fmt(r.mtdSls)}</td><td>${fmt(r.dailyGals)}</td><td>${fmt(r.mtdGals)}</td></tr>`).join('');
-                const col=(d.columns||{});const detected=Object.values(col).filter(Boolean).length;const dual=this.dualPassDiagnostic||{};
-                overlay.innerHTML=`<section style="width:min(98vw,860px);max-height:90vh;overflow:auto;background:#0f2747;color:#eef6ff;border:2px solid #38bdf8;border-radius:16px;padding:16px;box-shadow:0 24px 70px #000"><div style="display:flex;justify-content:space-between;gap:12px;align-items:start"><div><h2 style="font-size:18px;font-weight:900;margin:0">TEMP FULL-TABLE OCR REVIEW</h2><p style="margin:5px 0 12px;color:#bfdbfe">Status: <b>${d.status}</b> · Dual-zone scan · Headers: ${detected}/4 · Rows kept: ${rows.length} · Handoff: ${this.dailyOcrSelected?.label||'NOT READY'} · OCR words: ${dual.mergedWordCount??'—'} · Lowest Y: ${Number.isFinite(dual.lowestY)?dual.lowestY.toFixed(1):'—'} · Selected: <b>${selected?.label||'NOT MATCHED'}</b></p></div><button type="button" id="fullTableReviewClose" style="background:#38bdf8;color:#082f49;border:0;border-radius:9px;padding:8px 12px;font-weight:900">Close</button></div><div style="overflow:auto"><table style="width:100%;border-collapse:collapse;font:12px ui-monospace,monospace;text-align:right"><thead><tr style="background:#075985"><th>#</th><th>Y</th><th style="text-align:left">OCR row label</th><th>Day SLS</th><th>MTD SLS</th><th>Day Gals</th><th>MTD Gals</th></tr></thead><tbody>${body||'<tr><td colspan="7" style="text-align:center;padding:18px">No report rows were reconstructed.</td></tr>'}</tbody></table></div><p style="margin:12px 0 0;color:#bae6fd">Red rows have missing or invalid cells. Blue-green is the row selected for your saved territory/representative.</p></section>`;
-                document.body.appendChild(overlay);
-                overlay.querySelector('#fullTableReviewClose').addEventListener('click',()=>overlay.remove());
             }
 
             clearExecutiveRankCards(message = 'Rank unavailable') {
