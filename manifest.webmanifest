@@ -2,11 +2,17 @@
   "id": "./",
   "name": "Sales Tracker",
   "short_name": "Sales Tracker",
-  "start_url": "./index.html?source=pwa",
+  "description": "Daily sales, gallons, rankings, and pace tracking.",
+  "start_url": "./",
   "scope": "./",
   "display": "standalone",
+  "display_override": [
+    "standalone"
+  ],
   "background_color": "#061a3a",
   "theme_color": "#061a3a",
+  "orientation": "any",
+  "prefer_related_applications": false,
   "icons": [
     {
       "src": "./icons/icon-192.png",
