@@ -2017,8 +2017,16 @@ header .winner-title-line h1{display:flex!important;align-items:center!important
                     }
                     
                     const fields = { dailySls:'inputDailySls', dailyGals:'inputDailyGals', mtdSls:'inputMtdSls', mtdGals:'inputMtdGals' };
+                    // Clear stale values first, then dispatch input/change so the existing form state
+                    // receives exactly the same updates as a manual entry.
+                    Object.values(fields).forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
                     Object.entries(fields).forEach(([key,id]) => {
-                        if (Number.isFinite(best.values[key])) document.getElementById(id).value = best.values[key];
+                        const el=document.getElementById(id);
+                        if(el&&Number.isFinite(best.values[key])){
+                            el.value=String(best.values[key]);
+                            el.dispatchEvent(new Event('input',{bubbles:true}));
+                            el.dispatchEvent(new Event('change',{bubbles:true}));
+                        }
                     });
                     updateProgress(best.count ? `OCR complete: ${best.count} of 4 values found. Verify before saving.` : 'OCR completed but no matching row values were found.', 1);
                     this.showToast(best.count === 4 ? 'All four metrics extracted. Verify before saving.' : `OCR found ${best.count} of 4 metrics. Review the fields.`, best.count === 4 ? 'success' : 'error');
@@ -2219,10 +2227,26 @@ header .winner-title-line h1{display:flex!important;align-items:center!important
 
             extractTerritoryDashboardMetrics(ocrData, canvas) {
                 const table=this.extractTerritoryDashboardTable(ocrData,canvas);
-                if(!table)return null;
-                const r=table.selected;
+                const clean=value=>String(value||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+                let r=table?.selected||null;
+                // Daily entry only needs the selected row to be valid. If another territory has one
+                // imperfect OCR cell, ranking can remain unavailable without blocking Jeremy's four values.
+                if(!r){
+                    const rows=this.fullTableDiagnostic?.rows||this.fullTableDiagnostic?.rawRows||[];
+                    const rep=clean(this.selectedRep?.name);
+                    const territory=clean(this.selectedRep?.territory).replace(/^pro/,'');
+                    r=rows.find(row=>{
+                        const label=clean(row.label);
+                        return (rep.length>=3&&label.includes(rep))||(territory.length>=5&&label.includes(territory));
+                    })||null;
+                }
+                if(!r)return null;
                 const result={dailySls:r.dailySls,mtdSls:r.mtdSls,dailyGals:r.dailyGals,mtdGals:r.mtdGals};
-                console.log('Full-table daily OCR',{selected:r.label,rowCount:table.rows.length,result,rows:table.rows});
+                const valid=['dailySls','mtdSls','dailyGals','mtdGals'].every(key=>Number.isFinite(result[key]))&&
+                    result.mtdSls>=result.dailySls&&result.mtdGals>=result.dailyGals;
+                if(!valid)return null;
+                this.dailyOcrSelected={label:r.label,...result};
+                console.log('Dual-zone Daily OCR selected-row handoff',{selected:r.label,result});
                 return result;
             }
 
@@ -2249,7 +2273,7 @@ header .winner-title-line h1{display:flex!important;align-items:center!important
                 overlay.style.cssText='position:fixed;inset:0;z-index:2147483647;background:rgba(2,6,23,.9);display:flex;align-items:center;justify-content:center;padding:12px;';
                 const body=rows.map((r,i)=>`<tr style="${selected===r?'background:#164e63;':''}${!r.valid&&d.status!=='row-count'?'background:#591c24;':''}"><td>${i+1}</td><td>${Number.isFinite(r.y)?r.y.toFixed(1):'—'}</td><td style="text-align:left">${String(r.label||'NO LABEL').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}</td><td>${fmt(r.dailySls)}</td><td>${fmt(r.mtdSls)}</td><td>${fmt(r.dailyGals)}</td><td>${fmt(r.mtdGals)}</td></tr>`).join('');
                 const col=(d.columns||{});const detected=Object.values(col).filter(Boolean).length;const dual=this.dualPassDiagnostic||{};
-                overlay.innerHTML=`<section style="width:min(98vw,860px);max-height:90vh;overflow:auto;background:#0f2747;color:#eef6ff;border:2px solid #38bdf8;border-radius:16px;padding:16px;box-shadow:0 24px 70px #000"><div style="display:flex;justify-content:space-between;gap:12px;align-items:start"><div><h2 style="font-size:18px;font-weight:900;margin:0">TEMP FULL-TABLE OCR REVIEW</h2><p style="margin:5px 0 12px;color:#bfdbfe">Status: <b>${d.status}</b> · Dual-zone scan · Headers: ${detected}/4 · Rows kept: ${rows.length} · OCR words: ${dual.mergedWordCount??'—'} · Lowest Y: ${Number.isFinite(dual.lowestY)?dual.lowestY.toFixed(1):'—'} · Selected: <b>${selected?.label||'NOT MATCHED'}</b></p></div><button type="button" id="fullTableReviewClose" style="background:#38bdf8;color:#082f49;border:0;border-radius:9px;padding:8px 12px;font-weight:900">Close</button></div><div style="overflow:auto"><table style="width:100%;border-collapse:collapse;font:12px ui-monospace,monospace;text-align:right"><thead><tr style="background:#075985"><th>#</th><th>Y</th><th style="text-align:left">OCR row label</th><th>Day SLS</th><th>MTD SLS</th><th>Day Gals</th><th>MTD Gals</th></tr></thead><tbody>${body||'<tr><td colspan="7" style="text-align:center;padding:18px">No report rows were reconstructed.</td></tr>'}</tbody></table></div><p style="margin:12px 0 0;color:#bae6fd">Red rows have missing or invalid cells. Blue-green is the row selected for your saved territory/representative.</p></section>`;
+                overlay.innerHTML=`<section style="width:min(98vw,860px);max-height:90vh;overflow:auto;background:#0f2747;color:#eef6ff;border:2px solid #38bdf8;border-radius:16px;padding:16px;box-shadow:0 24px 70px #000"><div style="display:flex;justify-content:space-between;gap:12px;align-items:start"><div><h2 style="font-size:18px;font-weight:900;margin:0">TEMP FULL-TABLE OCR REVIEW</h2><p style="margin:5px 0 12px;color:#bfdbfe">Status: <b>${d.status}</b> · Dual-zone scan · Headers: ${detected}/4 · Rows kept: ${rows.length} · Handoff: ${this.dailyOcrSelected?.label||'NOT READY'} · OCR words: ${dual.mergedWordCount??'—'} · Lowest Y: ${Number.isFinite(dual.lowestY)?dual.lowestY.toFixed(1):'—'} · Selected: <b>${selected?.label||'NOT MATCHED'}</b></p></div><button type="button" id="fullTableReviewClose" style="background:#38bdf8;color:#082f49;border:0;border-radius:9px;padding:8px 12px;font-weight:900">Close</button></div><div style="overflow:auto"><table style="width:100%;border-collapse:collapse;font:12px ui-monospace,monospace;text-align:right"><thead><tr style="background:#075985"><th>#</th><th>Y</th><th style="text-align:left">OCR row label</th><th>Day SLS</th><th>MTD SLS</th><th>Day Gals</th><th>MTD Gals</th></tr></thead><tbody>${body||'<tr><td colspan="7" style="text-align:center;padding:18px">No report rows were reconstructed.</td></tr>'}</tbody></table></div><p style="margin:12px 0 0;color:#bae6fd">Red rows have missing or invalid cells. Blue-green is the row selected for your saved territory/representative.</p></section>`;
                 document.body.appendChild(overlay);
                 overlay.querySelector('#fullTableReviewClose').addEventListener('click',()=>overlay.remove());
             }
