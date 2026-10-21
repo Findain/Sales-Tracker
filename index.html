@@ -1979,8 +1979,11 @@ header .winner-title-line h1{display:flex!important;align-items:center!important
                             bbox: { x0: item.rect.left, y0: item.rect.top, x1: item.rect.right, y1: item.rect.bottom }
                         }));
                         const text = words.map(word => word.text).join(' ');
-                        const values = this.extractTerritoryDashboardMetrics({ words }, canvas) || this.extractDailyMetrics(text);
+                        // Both values and ranks come from the same reconstructed 12-person table.
                         const ranks = this.extractTerritoryDashboardRanks({ words }, canvas);
+                        const values = this.extractTerritoryDashboardMetrics({ words }, canvas);
+                        // Never parse arbitrary whole-report text when table reconstruction fails;
+                        // doing so can mistake company totals for the selected representative.
                         const count = ['dailySls','dailyGals','mtdSls','mtdGals'].filter(key => Number.isFinite(values?.[key])).length;
                         const rankCount = ['dailySales','mtdSales','dailyGals','mtdGals'].filter(key => Number.isFinite(ranks?.[key])).length;
                         const bestRankCount = ['dailySales','mtdSales','dailyGals','mtdGals'].filter(key => Number.isFinite(best.ranks?.[key])).length;
@@ -2099,126 +2102,12 @@ header .winner-title-line h1{display:flex!important;align-items:center!important
                 });
             }
 
-            extractTerritoryDashboardMetrics(ocrData, canvas) {
+            extractTerritoryDashboardTable(ocrData, canvas) {
                 const words=this.flattenOcrWords(ocrData);
-                if(!words.length||!this.selectedRep||!canvas)return null;
+                if(!words.length||!canvas)return null;
                 const cx=w=>(w.bbox.x0+w.bbox.x1)/2;
                 const cy=w=>(w.bbox.y0+w.bbox.y1)/2;
-                const h=w=>Math.max(1,w.bbox.y1-w.bbox.y0);
-                const clean=v=>String(v||'').toLowerCase().replace(/[^a-z0-9]/g,'');
-                const parseNumber=token=>{
-                    const raw=String(token||'').trim();
-                    if(!raw||/[%()]/.test(raw))return null;
-                    const text=raw.replace(/[$,]/g,'').replace(/[Oo]/g,'0').replace(/[Il|]/g,'1').replace(/[^0-9.\-]/g,'');
-                    if(!/[0-9]/.test(text))return null;
-                    const value=Number.parseFloat(text);
-                    return Number.isFinite(value)?value:null;
-                };
-
-                // Locate the selected row from recognized words, independent of screenshot zoom or margins.
-                const rep=clean(this.selectedRep.name);
-                const territory=clean(this.selectedRep.territory).replace(/^pro/,'');
-                const rowAnchors=words.filter(w=>{
-                    const token=clean(w.text);
-                    return (rep.length>=3&&(token===rep||token.includes(rep))) ||
-                        (territory.length>=5&&(token===territory||token.includes(territory)));
-                }).sort((x,y)=>{
-                    const xt=clean(x.text),yt=clean(y.text);
-                    return Number(yt.includes(rep))-Number(xt.includes(rep));
-                });
-                if(!rowAnchors.length)return null;
-                const rowAnchor=rowAnchors[0];
-                const rowY=cy(rowAnchor);
-                const rowTolerance=Math.max(14,h(rowAnchor)*1.15,canvas.height*.012);
-
-                // Find metric headers. Supports combined OCR ("DAY SLS") and split OCR ("DAY" + "SLS").
-                const headers=words.filter(w=>cy(w)<rowY-rowTolerance);
-                const directHeader=(period,metric)=>headers.filter(w=>{
-                    const t=clean(w.text);
-                    return t.includes(period)&&t.includes(metric);
-                }).sort((x,y)=>cy(y)-cy(x))[0]||null;
-                const splitHeader=(period,metric)=>{
-                    const p=headers.filter(w=>clean(w.text)===period);
-                    const m=headers.filter(w=>{
-                        const t=clean(w.text);
-                        return t===metric || (metric==='gals'&&/^(gal|gallon|gallons)$/.test(t));
-                    });
-                    let best=null,score=Infinity;
-                    p.forEach(pw=>m.forEach(mw=>{
-                        const dy=Math.abs(cy(pw)-cy(mw));
-                        const dx=cx(mw)-cx(pw);
-                        const maxDy=Math.max(h(pw),h(mw))*1.35+6;
-                        if(dy<=maxDy&&dx>=-canvas.width*.02&&dx<=canvas.width*.09){
-                            const candidate=dy*2+Math.abs(dx);
-                            if(candidate<score){score=candidate;best={x:(cx(pw)+cx(mw))/2,y:(cy(pw)+cy(mw))/2};}
-                        }
-                    }));
-                    return best;
-                };
-                const headerCenter=(period,metric)=>{
-                    const direct=directHeader(period,metric);
-                    if(direct)return {x:cx(direct),y:cy(direct)};
-                    return splitHeader(period,metric);
-                };
-                const columns={
-                    dailySls:headerCenter('day','sls'),
-                    mtdSls:headerCenter('mtd','sls'),
-                    dailyGals:headerCenter('day','gals'),
-                    mtdGals:headerCenter('mtd','gals')
-                };
-                const detected=Object.values(columns).filter(Boolean).length;
-
-                // Read the selected row at each detected header X-position. Percent cells are excluded.
-                const rowNumbers=words.map(w=>({word:w,x:cx(w),y:cy(w),value:parseNumber(w.text)}))
-                    .filter(item=>Number.isFinite(item.value)&&Math.abs(item.y-rowY)<=rowTolerance);
-                const result={};
-                const used=new Set();
-                const orderedColumns=Object.entries(columns).filter(([,v])=>v).sort((a,b)=>a[1].x-b[1].x);
-                orderedColumns.forEach(([key,column],index)=>{
-                    const left=index?((orderedColumns[index-1][1].x+column.x)/2):column.x-canvas.width*.055;
-                    const right=index<orderedColumns.length-1?((column.x+orderedColumns[index+1][1].x)/2):column.x+canvas.width*.055;
-                    let best=-1,bestScore=Infinity;
-                    rowNumbers.forEach((item,itemIndex)=>{
-                        if(used.has(itemIndex)||item.x<=left||item.x>=right)return;
-                        const score=Math.abs(item.x-column.x)+Math.abs(item.y-rowY)*1.5;
-                        if(score<bestScore){bestScore=score;best=itemIndex;}
-                    });
-                    if(best>=0&&bestScore<=canvas.width*.06){result[key]=rowNumbers[best].value;used.add(best);}
-                });
-
-                // Require all four word-anchored cells before accepting the flexible result.
-                if(detected===4&&['dailySls','mtdSls','dailyGals','mtdGals'].every(k=>Number.isFinite(result[k]))&&
-                    result.mtdSls>=result.dailySls&&result.mtdGals>=result.dailyGals){
-                    console.log('Word-anchored daily OCR',{rep:this.selectedRep.name,rowY,columns,result});
-                    return result;
-                }
-
-                // Compatibility fallback for older report captures whose headers were clipped out.
-                const expected={dailySls:.284,mtdSls:.405,dailyGals:.773,mtdGals:.895};
-                const fallback={};const fallbackUsed=new Set();
-                Object.entries(expected).forEach(([key,ratio])=>{
-                    const targetX=canvas.width*ratio;let best=-1,distance=Infinity;
-                    rowNumbers.forEach((item,index)=>{
-                        if(fallbackUsed.has(index))return;
-                        const d=Math.abs(item.x-targetX);
-                        if(d<distance){distance=d;best=index;}
-                    });
-                    if(best>=0&&distance<=canvas.width*.045){fallback[key]=rowNumbers[best].value;fallbackUsed.add(best);}
-                });
-                if(['dailySls','mtdSls','dailyGals','mtdGals'].every(k=>Number.isFinite(fallback[k]))&&
-                    fallback.mtdSls>=fallback.dailySls&&fallback.mtdGals>=fallback.dailyGals){
-                    console.warn('Daily OCR used geometry fallback because headers were incomplete',{detected,columns,fallback});
-                    return fallback;
-                }
-                console.warn('Daily OCR could not validate header/row intersections',{detected,columns,rowNumbers,result});
-                return null;
-            }
-
-            extractTerritoryDashboardRanks(ocrData, canvas) {
-                const words=this.flattenOcrWords(ocrData);
-                if(!words.length||!canvas||!this.selectedRep)return null;
-                const cx=w=>(w.bbox.x0+w.bbox.x1)/2;
-                const cy=w=>(w.bbox.y0+w.bbox.y1)/2;
+                const wh=w=>Math.max(1,w.bbox.y1-w.bbox.y0);
                 const clean=v=>String(v||'').toLowerCase().replace(/[^a-z0-9]/g,'');
                 const number=v=>{
                     const raw=String(v||'').trim();
@@ -2228,79 +2117,113 @@ header .winner-title-line h1{display:flex!important;align-items:center!important
                     const parsed=Number.parseFloat(text);
                     return Number.isFinite(parsed)?parsed:null;
                 };
-                const columns={dailySls:.283,mtdSls:.405,dailyGals:.776,mtdGals:.894};
-                const xTolerance=canvas.width*.038;
-                const numeric=words.map(w=>({w,x:cx(w),y:cy(w),value:number(w.text)})).filter(item=>Number.isFinite(item.value));
+                const median=values=>{const a=values.filter(Number.isFinite).sort((x,y)=>x-y);return a.length?a[Math.floor(a.length/2)]:null;};
 
-                // Derive row spacing from the numeric rows OCR did recognize. This avoids the previous
-                // fixed-grid drift that included Total as row 1 and skipped the middle of the table.
-                const candidates=numeric.filter(item=>Object.values(columns).some(r=>Math.abs(item.x-canvas.width*r)<=xTolerance));
-                const yClusters=[];
-                candidates.sort((a,b)=>a.y-b.y).forEach(item=>{
-                    let cluster=yClusters.find(c=>Math.abs(c.y-item.y)<Math.max(8,canvas.height*.010));
-                    if(!cluster){cluster={y:item.y,items:[]};yClusters.push(cluster);}
-                    cluster.items.push(item);cluster.y=cluster.items.reduce((sum,x)=>sum+x.y,0)/cluster.items.length;
+                // Recover a header X-position from either a combined token or adjacent split words.
+                const header=(period,metric)=>{
+                    const direct=words.filter(w=>{const t=clean(w.text);return t.includes(period)&&
+                        (t.includes(metric)||(metric==='gals'&&/(gal|gallon)/.test(t)));})
+                        .sort((x,y)=>cy(x)-cy(y))[0];
+                    if(direct)return {x:cx(direct),y:cy(direct),source:direct.text};
+                    const left=words.filter(w=>clean(w.text)===period);
+                    const right=words.filter(w=>{const t=clean(w.text);return t===metric||
+                        (metric==='gals'&&/^(gal|gals|gallon|gallons)$/.test(t));});
+                    let best=null,score=Infinity;
+                    left.forEach(l=>right.forEach(r=>{
+                        const dy=Math.abs(cy(l)-cy(r)),dx=cx(r)-cx(l),limit=Math.max(wh(l),wh(r))*1.5+8;
+                        if(dy<=limit&&dx>=-canvas.width*.025&&dx<=canvas.width*.11){const s=dy*2+Math.abs(dx);
+                            if(s<score){score=s;best={x:(cx(l)+cx(r))/2,y:(cy(l)+cy(r))/2,source:`${l.text} ${r.text}`};}}
+                    }));
+                    return best;
+                };
+                const columns={dailySls:header('day','sls'),mtdSls:header('mtd','sls'),dailyGals:header('day','gals'),mtdGals:header('mtd','gals')};
+                if(Object.values(columns).some(v=>!v))return null;
+                const headerY=median(Object.values(columns).map(v=>v.y));
+                const ordered=Object.entries(columns).sort((a,b)=>a[1].x-b[1].x);
+                const firstX=ordered[0][1].x;
+
+                // Group all recognized words below the headers into physical report rows.
+                const below=words.filter(w=>cy(w)>headerY+Math.max(10,wh(w)*.6)).sort((a,b)=>cy(a)-cy(b));
+                const typicalHeight=median(below.map(wh))||18;
+                const clusterGap=Math.max(8,typicalHeight*.75);
+                const clusters=[];
+                below.forEach(w=>{
+                    const y=cy(w);let c=clusters.find(row=>Math.abs(row.y-y)<=clusterGap);
+                    if(!c){c={y,words:[]};clusters.push(c);}
+                    c.words.push(w);c.y=c.words.reduce((sum,x)=>sum+cy(x),0)/c.words.length;
                 });
-                const centers=yClusters.filter(c=>c.items.length>=2).map(c=>c.y).sort((a,b)=>a-b);
-                const gaps=[];
-                for(let i=1;i<centers.length;i++){
-                    const gap=centers[i]-centers[i-1];
-                    if(gap>canvas.height*.025&&gap<canvas.height*.09)gaps.push(gap);
-                }
-                gaps.sort((a,b)=>a-b);
-                const rowStep=gaps.length?gaps[Math.floor(gaps.length/2)]:canvas.height*.0583;
-                const yTolerance=Math.max(13,rowStep*.46);
-                const readCell=(rowY,ratio)=>{
-                    const targetX=canvas.width*ratio;
-                    const hits=numeric.filter(item=>Math.abs(item.y-rowY)<=yTolerance&&Math.abs(item.x-targetX)<=xTolerance)
-                        .sort((a,b)=>(Math.abs(a.y-rowY)*2+Math.abs(a.x-targetX))-(Math.abs(b.y-rowY)*2+Math.abs(b.x-targetX)));
+
+                const readCell=(row,column,index)=>{
+                    const left=index?((ordered[index-1][1].x+column.x)/2):column.x-canvas.width*.06;
+                    const right=index<ordered.length-1?((column.x+ordered[index+1][1].x)/2):column.x+canvas.width*.06;
+                    const hits=row.words.map(w=>({w,x:cx(w),value:number(w.text)}))
+                        .filter(x=>Number.isFinite(x.value)&&x.x>left&&x.x<right)
+                        .sort((a,b)=>Math.abs(a.x-column.x)-Math.abs(b.x-column.x));
                     return hits.length?hits[0].value:null;
                 };
-                // Correct anchor: use the first numeric row that contains all four target columns.
-                // The prior build used an unrelated OCR token reading "Total" several rows above the table.
-                const completeCenters=centers.map(y=>({y,values:Object.fromEntries(Object.entries(columns).map(([key,ratio])=>[key,readCell(y,ratio)]))}))
-                    .filter(row=>Object.values(row.values).every(Number.isFinite));
-                const totalCandidate=completeCenters.find(row=>row.values.mtdSls>500000&&row.values.mtdGals>10000) || completeCenters[0];
-                if(!totalCandidate){
-                    this.rankDiagnostic={status:'no-total-anchor',found:0,rowStep,rows:[]};
-                    return null;
+                let rows=clusters.map(row=>{
+                    const labelWords=row.words.filter(w=>cx(w)<firstX-canvas.width*.025).sort((a,b)=>a.bbox.x0-b.bbox.x0);
+                    const label=labelWords.map(w=>w.text).join(' ').replace(/\s+/g,' ').trim();
+                    const normalized=clean(label);
+                    const values={};ordered.forEach(([key,col],i)=>values[key]=readCell(row,col,i));
+                    const count=Object.values(values).filter(Number.isFinite).length;
+                    return {y:row.y,label,normalized,...values,count};
+                }).filter(row=>row.label);
+
+                // Total is useful as a boundary but never eligible as a person/territory row.
+                const totalIndex=rows.findIndex(r=>r.normalized.includes('total'));
+                if(totalIndex>=0)rows=rows.slice(totalIndex+1);
+                rows=rows.filter(r=>!r.normalized.includes('total'));
+
+                // Keep the contiguous report block. Labels establish identity; numbers stay attached to each label row.
+                if(rows.length>12){
+                    let best=null;
+                    for(let i=0;i<=rows.length-12;i++){
+                        const block=rows.slice(i,i+12);
+                        const complete=block.reduce((n,r)=>n+r.count,0);
+                        const spacing=[];for(let j=1;j<block.length;j++)spacing.push(block[j].y-block[j-1].y);
+                        const mid=median(spacing)||1;const drift=spacing.reduce((n,g)=>n+Math.abs(g-mid),0);
+                        const score=complete*100-drift;
+                        if(!best||score>best.score)best={block,score};
+                    }
+                    rows=best.block;
                 }
-                const totalY=totalCandidate.y;
-                const rows=[];
-                // Skip the numeric Total row. Territory 1 begins exactly one measured row step below it.
-                for(let index=0;index<12;index++){
-                    const y=totalY+rowStep*(index+1);
-                    const row={index,y};
-                    Object.entries(columns).forEach(([key,ratio])=>row[key]=readCell(y,ratio));
-                    rows.push(row);
-                }
-                // Seattle Central is a legitimate all-zero final row. Tesseract may omit isolated
-                // zero glyphs entirely, so recover the row only when all four final-row cells are absent.
-                const lastRow=rows[rows.length-1];
-                if(lastRow && Object.keys(columns).every(key=>lastRow[key]===null)){
-                    Object.keys(columns).forEach(key=>lastRow[key]=0);
-                    lastRow.inferredZeroRow=true;
-                }
-                const complete=rows.filter(row=>Object.keys(columns).every(key=>Number.isFinite(row[key])));
-                if(complete.length!==12){
-                    this.rankDiagnostic={status:'incomplete',found:complete.length,totalY,rowStep,rows:rows.map(r=>({index:r.index+1,dailySls:r.dailySls,mtdSls:r.mtdSls,dailyGals:r.dailyGals,mtdGals:r.mtdGals,inferredZeroRow:!!r.inferredZeroRow,ocrAnomaly:!!r.ocrAnomaly}))};
-                    console.warn('Dynamic-grid rank scan incomplete',this.rankDiagnostic);
-                    return null;
-                }
-                // Flag impossible OCR values for diagnostics, but do not discard the complete rank set.
-                // A clipped leading digit still preserves whether that row is above or below Medford in this report.
-                complete.forEach(row=>row.ocrAnomaly=(row.mtdSls<row.dailySls||row.mtdGals<row.dailyGals));
-                const rep=clean(this.selectedRep.name);
-                const territory=clean(this.selectedRep.territory).replace(/^pro/,'');
-                const selectedWord=words.find(w=>clean(w.text).includes(rep)) || words.find(w=>territory.length>=5&&clean(w.text).includes(territory));
-                if(!selectedWord)return null;
-                const selectedY=cy(selectedWord);
-                const selected=complete.reduce((best,row)=>Math.abs(row.y-selectedY)<Math.abs(best.y-selectedY)?row:best,complete[0]);
-                if(Math.abs(selected.y-selectedY)>rowStep*.7)return null;
-                const rank=key=>1+complete.filter(row=>row[key]>selected[key]).length;
+                if(rows.length!==12)return null;
+
+                // A named all-zero territory may have no OCR number glyphs. Infer zero only when all four cells are absent.
+                rows.forEach(row=>{
+                    if(row.count===0&&row.label){ordered.forEach(([key])=>row[key]=0);row.count=4;row.inferredZeroRow=true;}
+                    row.valid=['dailySls','mtdSls','dailyGals','mtdGals'].every(k=>Number.isFinite(row[k]))&&
+                        row.mtdSls>=row.dailySls&&row.mtdGals>=row.dailyGals;
+                });
+                if(rows.some(r=>!r.valid))return null;
+
+                const rep=clean(this.selectedRep?.name),territory=clean(this.selectedRep?.territory).replace(/^pro/,'');
+                let selected=rows.find(r=>(rep.length>=3&&r.normalized.includes(rep))||
+                    (territory.length>=5&&r.normalized.includes(territory)));
+                if(!selected)return null;
+                return {columns,headerY,rows,selected};
+            }
+
+            extractTerritoryDashboardMetrics(ocrData, canvas) {
+                const table=this.extractTerritoryDashboardTable(ocrData,canvas);
+                if(!table)return null;
+                const r=table.selected;
+                const result={dailySls:r.dailySls,mtdSls:r.mtdSls,dailyGals:r.dailyGals,mtdGals:r.mtdGals};
+                console.log('Full-table daily OCR',{selected:r.label,rowCount:table.rows.length,result,rows:table.rows});
+                return result;
+            }
+
+            extractTerritoryDashboardRanks(ocrData, canvas) {
+                const table=this.extractTerritoryDashboardTable(ocrData,canvas);
+                if(!table||!this.selectedRep)return null;
+                const {rows,selected}=table;
+                const rank=key=>1+rows.filter(row=>row[key]>selected[key]).length;
                 const result={dailySales:rank('dailySls'),mtdSales:rank('mtdSls'),dailyGals:rank('dailyGals'),mtdGals:rank('mtdGals'),total:12};
-                this.rankDiagnostic={status:'complete',found:12,totalY,rowStep,selectedRow:selected.index+1,selected:{dailySls:selected.dailySls,mtdSls:selected.mtdSls,dailyGals:selected.dailyGals,mtdGals:selected.mtdGals},result,rows:complete.map(r=>({index:r.index+1,dailySls:r.dailySls,mtdSls:r.mtdSls,dailyGals:r.dailyGals,mtdGals:r.mtdGals}))};
-                console.log('Validated dynamic-grid 12-row territory ranks',this.rankDiagnostic);
+                this.rankDiagnostic={status:'complete',found:12,selectedRow:rows.indexOf(selected)+1,
+                    selected:{dailySls:selected.dailySls,mtdSls:selected.mtdSls,dailyGals:selected.dailyGals,mtdGals:selected.mtdGals},
+                    result,rows:rows.map((r,index)=>({index:index+1,label:r.label,dailySls:r.dailySls,mtdSls:r.mtdSls,dailyGals:r.dailyGals,mtdGals:r.mtdGals}))};
+                console.log('Validated full-table territory OCR',{selected:selected.label,result,rows});
                 return result;
             }
 
