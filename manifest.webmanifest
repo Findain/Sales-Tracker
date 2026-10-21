@@ -1,5 +1,5 @@
 {
-  "id": "./sales-tracker-r7",
+  "id": "./",
   "name": "Sales Tracker",
   "short_name": "Sales Tracker",
   "description": "Daily sales, gallons, rankings, and pace tracking.",
@@ -11,25 +11,25 @@
   "prefer_related_applications": false,
   "icons": [
     {
-      "src": "./wib-icon-192-r7.png",
+      "src": "./wib-icon-192-r8.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "./wib-icon-512-r7.png",
+      "src": "./wib-icon-512-r8.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "./wib-icon-maskable-192-r7.png",
+      "src": "./wib-icon-maskable-192-r8.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "maskable"
     },
     {
-      "src": "./wib-icon-maskable-512-r7.png",
+      "src": "./wib-icon-maskable-512-r8.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
