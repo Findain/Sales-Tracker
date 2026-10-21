@@ -6,12 +6,8 @@
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "display_override": [
-    "standalone"
-  ],
   "background_color": "#061a3a",
   "theme_color": "#061a3a",
-  "orientation": "any",
   "prefer_related_applications": false,
   "icons": [
     {
