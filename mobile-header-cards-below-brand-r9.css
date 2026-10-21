@@ -1,0 +1,79 @@
+/* Sales Tracker mobile header order: brand first, glass rank cards second. */
+@media (max-width:700px){
+  body > header > div:first-child{
+    display:flex !important;
+    flex-direction:column !important;
+    align-items:stretch !important;
+    gap:10px !important;
+    width:100% !important;
+  }
+
+  /* The logo + Sales Tracker title block stays at the top. */
+  body > header > div:first-child > :has(#v3210WestIsBestHeaderLogo),
+  body > header > div:first-child > .min-w-0{
+    order:1 !important;
+    width:100% !important;
+    max-width:100% !important;
+    overflow:visible !important;
+  }
+
+  body > header .winner-title-line{
+    display:flex !important;
+    flex-direction:column !important;
+    align-items:center !important;
+    justify-content:center !important;
+    gap:4px !important;
+    width:100% !important;
+    text-align:center !important;
+  }
+
+  body > header .winner-title-line h1{
+    display:flex !important;
+    flex-direction:column !important;
+    align-items:center !important;
+    justify-content:center !important;
+    gap:4px !important;
+    width:100% !important;
+    white-space:normal !important;
+    text-align:center !important;
+  }
+
+  #v3210WestIsBestHeaderLogo{
+    order:-1 !important;
+    width:150px !important;
+    max-width:150px !important;
+    height:64px !important;
+    margin:0 auto !important;
+    object-fit:contain !important;
+  }
+
+  /* The two glass cards now form the second header row. */
+  #execRankWrap,
+  .execRankWrap{
+    order:2 !important;
+    display:grid !important;
+    grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+    gap:10px !important;
+    width:100% !important;
+    max-width:100% !important;
+    margin:2px 0 0 !important;
+  }
+
+  #execRankWrap .execCard,
+  .execRankWrap .execCard{
+    min-width:0 !important;
+    width:100% !important;
+    padding:10px 12px !important;
+  }
+
+  #execRankWrap .execRank,
+  .execRankWrap .execRank{
+    font-size:24px !important;
+    margin:7px 0 6px !important;
+  }
+
+  /* Header controls remain below the brand and cards. */
+  body > header > div:first-child > *:not(:has(#v3210WestIsBestHeaderLogo)):not(#execRankWrap):not(.execRankWrap):not(.min-w-0){
+    order:3 !important;
+  }
+}
