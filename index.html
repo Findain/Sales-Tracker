@@ -2046,13 +2046,15 @@ header .winner-title-line h1{display:flex!important;align-items:center!important
                 });
                 if (!image.naturalWidth || !image.naturalHeight) throw new Error('The selected image has no readable dimensions.');
 
-                // The Territory Breakdown grid occupies the upper-middle portion of this fixed report layout.
-                // Crop out the navigation bar and the large blank area so OCR can focus on headers and rep rows.
+                // Keep almost the full screenshot in the OCR canvas. The old crop ended at 53.5% of image height,
+                // so differently zoomed reports physically lost the bottom territory rows before OCR ran.
+                const cropTop = Math.round(image.naturalHeight * 0.08);
+                const cropBottom = Math.round(image.naturalHeight * 0.92);
                 const crop = {
                     x: 0,
-                    y: Math.round(image.naturalHeight * 0.145),
+                    y: cropTop,
                     width: image.naturalWidth,
-                    height: Math.round(image.naturalHeight * 0.39)
+                    height: Math.max(1, cropBottom - cropTop)
                 };
                 const maxWidth = 3600;
                 const scale = Math.max(1, Math.min(2.2, maxWidth / crop.width));
@@ -2265,7 +2267,7 @@ header .winner-title-line h1{display:flex!important;align-items:center!important
                 overlay.style.cssText='position:fixed;inset:0;z-index:2147483647;background:rgba(2,6,23,.9);display:flex;align-items:center;justify-content:center;padding:12px;';
                 const body=rows.map((r,i)=>`<tr style="${selected===r?'background:#164e63;':''}${!r.valid&&d.status!=='row-count'?'background:#591c24;':''}"><td>${i+1}</td><td>${Number.isFinite(r.y)?r.y.toFixed(1):'—'}</td><td style="text-align:left">${String(r.label||'NO LABEL').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}</td><td>${fmt(r.dailySls)}</td><td>${fmt(r.mtdSls)}</td><td>${fmt(r.dailyGals)}</td><td>${fmt(r.mtdGals)}</td></tr>`).join('');
                 const col=(d.columns||{});const detected=Object.values(col).filter(Boolean).length;
-                overlay.innerHTML=`<section style="width:min(98vw,860px);max-height:90vh;overflow:auto;background:#0f2747;color:#eef6ff;border:2px solid #38bdf8;border-radius:16px;padding:16px;box-shadow:0 24px 70px #000"><div style="display:flex;justify-content:space-between;gap:12px;align-items:start"><div><h2 style="font-size:18px;font-weight:900;margin:0">TEMP FULL-TABLE OCR REVIEW</h2><p style="margin:5px 0 12px;color:#bfdbfe">Status: <b>${d.status}</b> · Headers: ${detected}/4 · Rows kept: ${rows.length} · Selected: <b>${selected?.label||'NOT MATCHED'}</b></p></div><button type="button" id="fullTableReviewClose" style="background:#38bdf8;color:#082f49;border:0;border-radius:9px;padding:8px 12px;font-weight:900">Close</button></div><div style="overflow:auto"><table style="width:100%;border-collapse:collapse;font:12px ui-monospace,monospace;text-align:right"><thead><tr style="background:#075985"><th>#</th><th>Y</th><th style="text-align:left">OCR row label</th><th>Day SLS</th><th>MTD SLS</th><th>Day Gals</th><th>MTD Gals</th></tr></thead><tbody>${body||'<tr><td colspan="7" style="text-align:center;padding:18px">No report rows were reconstructed.</td></tr>'}</tbody></table></div><p style="margin:12px 0 0;color:#bae6fd">Red rows have missing or invalid cells. Blue-green is the row selected for your saved territory/representative.</p></section>`;
+                overlay.innerHTML=`<section style="width:min(98vw,860px);max-height:90vh;overflow:auto;background:#0f2747;color:#eef6ff;border:2px solid #38bdf8;border-radius:16px;padding:16px;box-shadow:0 24px 70px #000"><div style="display:flex;justify-content:space-between;gap:12px;align-items:start"><div><h2 style="font-size:18px;font-weight:900;margin:0">TEMP FULL-TABLE OCR REVIEW</h2><p style="margin:5px 0 12px;color:#bfdbfe">Status: <b>${d.status}</b> · Full-height scan · Headers: ${detected}/4 · Rows kept: ${rows.length} · Selected: <b>${selected?.label||'NOT MATCHED'}</b></p></div><button type="button" id="fullTableReviewClose" style="background:#38bdf8;color:#082f49;border:0;border-radius:9px;padding:8px 12px;font-weight:900">Close</button></div><div style="overflow:auto"><table style="width:100%;border-collapse:collapse;font:12px ui-monospace,monospace;text-align:right"><thead><tr style="background:#075985"><th>#</th><th>Y</th><th style="text-align:left">OCR row label</th><th>Day SLS</th><th>MTD SLS</th><th>Day Gals</th><th>MTD Gals</th></tr></thead><tbody>${body||'<tr><td colspan="7" style="text-align:center;padding:18px">No report rows were reconstructed.</td></tr>'}</tbody></table></div><p style="margin:12px 0 0;color:#bae6fd">Red rows have missing or invalid cells. Blue-green is the row selected for your saved territory/representative.</p></section>`;
                 document.body.appendChild(overlay);
                 overlay.querySelector('#fullTableReviewClose').addEventListener('click',()=>overlay.remove());
             }
