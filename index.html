@@ -2146,16 +2146,27 @@ header .winner-title-line h1{display:flex!important;align-items:center!important
                 const ordered=Object.entries(columns).sort((a,b)=>a[1].x-b[1].x);
                 const firstX=ordered[0][1].x;
 
-                // Group all recognized words below the headers into physical report rows.
+                // Build rows from the left-side territory/representative labels first. Numeric words no longer
+                // define row centers, so a tall/misaligned number cannot merge rows 9-12 together.
                 const below=words.filter(w=>cy(w)>headerY+Math.max(10,wh(w)*.6)).sort((a,b)=>cy(a)-cy(b));
                 const typicalHeight=median(below.map(wh))||18;
-                const clusterGap=Math.max(8,typicalHeight*.75);
-                const clusters=[];
-                below.forEach(w=>{
-                    const y=cy(w);let c=clusters.find(row=>Math.abs(row.y-y)<=clusterGap);
-                    if(!c){c={y,words:[]};clusters.push(c);}
-                    c.words.push(w);c.y=c.words.reduce((sum,x)=>sum+cy(x),0)/c.words.length;
+                const leftWords=below.filter(w=>cx(w)<firstX-canvas.width*.025);
+                const labelGap=Math.max(4,typicalHeight*.42);
+                const labelClusters=[];
+                leftWords.forEach(w=>{
+                    const y=cy(w);let c=labelClusters.find(row=>Math.abs(row.y-y)<=labelGap);
+                    if(!c){c={y,labels:[]};labelClusters.push(c);}
+                    c.labels.push(w);c.y=c.labels.reduce((sum,x)=>sum+cy(x),0)/c.labels.length;
                 });
+                labelClusters.forEach(c=>{
+                    c.labels.sort((x,y)=>x.bbox.x0-y.bbox.x0);
+                    c.label=c.labels.map(w=>w.text).join(' ').replace(/\s+/g,' ').trim();
+                    c.normalized=clean(c.label);
+                });
+                let totalLabelIndex=labelClusters.findIndex(c=>c.normalized.includes('total'));
+                let anchors=totalLabelIndex>=0?labelClusters.slice(totalLabelIndex):labelClusters;
+                // Remove obvious non-row labels while retaining Total and named zero-value rows.
+                anchors=anchors.filter(c=>c.label&&!/^(day|mtd|sls|gals|actual|budget|territory|representative|rep)$/i.test(c.label));
 
                 const readCell=(row,column,index)=>{
                     const left=index?((ordered[index-1][1].x+column.x)/2):column.x-canvas.width*.06;
@@ -2165,14 +2176,16 @@ header .winner-title-line h1{display:flex!important;align-items:center!important
                         .sort((a,b)=>Math.abs(a.x-column.x)-Math.abs(b.x-column.x));
                     return hits.length?hits[0].value:null;
                 };
-                let rows=clusters.map(row=>{
-                    const labelWords=row.words.filter(w=>cx(w)<firstX-canvas.width*.025).sort((a,b)=>a.bbox.x0-b.bbox.x0);
-                    const label=labelWords.map(w=>w.text).join(' ').replace(/\s+/g,' ').trim();
-                    const normalized=clean(label);
+                let rows=anchors.map((anchor,index)=>{
+                    const previous=index?anchors[index-1].y:null,next=index<anchors.length-1?anchors[index+1].y:null;
+                    const top=previous==null?anchor.y-typicalHeight:(previous+anchor.y)/2;
+                    const bottom=next==null?anchor.y+typicalHeight:(anchor.y+next)/2;
+                    const rowWords=below.filter(w=>cy(w)>=top&&cy(w)<bottom);
+                    const row={y:anchor.y,label:anchor.label,normalized:anchor.normalized,words:rowWords};
                     const values={};ordered.forEach(([key,col],i)=>values[key]=readCell(row,col,i));
                     const count=Object.values(values).filter(Number.isFinite).length;
-                    return {y:row.y,label,normalized,...values,count};
-                }).filter(row=>row.label);
+                    return {y:row.y,label:row.label,normalized:row.normalized,...values,count};
+                });
 
                 const rawRows=rows.map(r=>({...r}));
                 // Total is useful as a boundary but never eligible as a person/territory row.
@@ -2250,9 +2263,9 @@ header .winner-title-line h1{display:flex!important;align-items:center!important
                 const selected=d.selected;
                 const overlay=document.createElement('div');overlay.id='fullTableOcrReview';
                 overlay.style.cssText='position:fixed;inset:0;z-index:2147483647;background:rgba(2,6,23,.9);display:flex;align-items:center;justify-content:center;padding:12px;';
-                const body=rows.map((r,i)=>`<tr style="${selected===r?'background:#164e63;':''}${!r.valid&&d.status!=='row-count'?'background:#591c24;':''}"><td>${i+1}</td><td style="text-align:left">${String(r.label||'NO LABEL').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}</td><td>${fmt(r.dailySls)}</td><td>${fmt(r.mtdSls)}</td><td>${fmt(r.dailyGals)}</td><td>${fmt(r.mtdGals)}</td></tr>`).join('');
+                const body=rows.map((r,i)=>`<tr style="${selected===r?'background:#164e63;':''}${!r.valid&&d.status!=='row-count'?'background:#591c24;':''}"><td>${i+1}</td><td>${Number.isFinite(r.y)?r.y.toFixed(1):'—'}</td><td style="text-align:left">${String(r.label||'NO LABEL').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}</td><td>${fmt(r.dailySls)}</td><td>${fmt(r.mtdSls)}</td><td>${fmt(r.dailyGals)}</td><td>${fmt(r.mtdGals)}</td></tr>`).join('');
                 const col=(d.columns||{});const detected=Object.values(col).filter(Boolean).length;
-                overlay.innerHTML=`<section style="width:min(98vw,860px);max-height:90vh;overflow:auto;background:#0f2747;color:#eef6ff;border:2px solid #38bdf8;border-radius:16px;padding:16px;box-shadow:0 24px 70px #000"><div style="display:flex;justify-content:space-between;gap:12px;align-items:start"><div><h2 style="font-size:18px;font-weight:900;margin:0">TEMP FULL-TABLE OCR REVIEW</h2><p style="margin:5px 0 12px;color:#bfdbfe">Status: <b>${d.status}</b> · Headers: ${detected}/4 · Rows kept: ${rows.length} · Selected: <b>${selected?.label||'NOT MATCHED'}</b></p></div><button type="button" id="fullTableReviewClose" style="background:#38bdf8;color:#082f49;border:0;border-radius:9px;padding:8px 12px;font-weight:900">Close</button></div><div style="overflow:auto"><table style="width:100%;border-collapse:collapse;font:12px ui-monospace,monospace;text-align:right"><thead><tr style="background:#075985"><th>#</th><th style="text-align:left">OCR row label</th><th>Day SLS</th><th>MTD SLS</th><th>Day Gals</th><th>MTD Gals</th></tr></thead><tbody>${body||'<tr><td colspan="6" style="text-align:center;padding:18px">No report rows were reconstructed.</td></tr>'}</tbody></table></div><p style="margin:12px 0 0;color:#bae6fd">Red rows have missing or invalid cells. Blue-green is the row selected for your saved territory/representative.</p></section>`;
+                overlay.innerHTML=`<section style="width:min(98vw,860px);max-height:90vh;overflow:auto;background:#0f2747;color:#eef6ff;border:2px solid #38bdf8;border-radius:16px;padding:16px;box-shadow:0 24px 70px #000"><div style="display:flex;justify-content:space-between;gap:12px;align-items:start"><div><h2 style="font-size:18px;font-weight:900;margin:0">TEMP FULL-TABLE OCR REVIEW</h2><p style="margin:5px 0 12px;color:#bfdbfe">Status: <b>${d.status}</b> · Headers: ${detected}/4 · Rows kept: ${rows.length} · Selected: <b>${selected?.label||'NOT MATCHED'}</b></p></div><button type="button" id="fullTableReviewClose" style="background:#38bdf8;color:#082f49;border:0;border-radius:9px;padding:8px 12px;font-weight:900">Close</button></div><div style="overflow:auto"><table style="width:100%;border-collapse:collapse;font:12px ui-monospace,monospace;text-align:right"><thead><tr style="background:#075985"><th>#</th><th>Y</th><th style="text-align:left">OCR row label</th><th>Day SLS</th><th>MTD SLS</th><th>Day Gals</th><th>MTD Gals</th></tr></thead><tbody>${body||'<tr><td colspan="7" style="text-align:center;padding:18px">No report rows were reconstructed.</td></tr>'}</tbody></table></div><p style="margin:12px 0 0;color:#bae6fd">Red rows have missing or invalid cells. Blue-green is the row selected for your saved territory/representative.</p></section>`;
                 document.body.appendChild(overlay);
                 overlay.querySelector('#fullTableReviewClose').addEventListener('click',()=>overlay.remove());
             }
