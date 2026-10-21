@@ -2002,6 +2002,7 @@ header .winner-title-line h1{display:flex!important;align-items:center!important
                     }
 
                     if (best.rankDiagnostic) this.rankDiagnostic = best.rankDiagnostic;
+                    this.showFullTableReview();
                     if (rawText) rawText.textContent = best.text || 'OCR completed but returned no readable text.';
                     details?.classList.remove('hidden');
                     if (best.ranks) {
@@ -2137,7 +2138,10 @@ header .winner-title-line h1{display:flex!important;align-items:center!important
                     return best;
                 };
                 const columns={dailySls:header('day','sls'),mtdSls:header('mtd','sls'),dailyGals:header('day','gals'),mtdGals:header('mtd','gals')};
-                if(Object.values(columns).some(v=>!v))return null;
+                if(Object.values(columns).some(v=>!v)){
+                    this.fullTableDiagnostic={status:'headers-missing',columns,rows:[],selected:null};
+                    return null;
+                }
                 const headerY=median(Object.values(columns).map(v=>v.y));
                 const ordered=Object.entries(columns).sort((a,b)=>a[1].x-b[1].x);
                 const firstX=ordered[0][1].x;
@@ -2170,6 +2174,7 @@ header .winner-title-line h1{display:flex!important;align-items:center!important
                     return {y:row.y,label,normalized,...values,count};
                 }).filter(row=>row.label);
 
+                const rawRows=rows.map(r=>({...r}));
                 // Total is useful as a boundary but never eligible as a person/territory row.
                 const totalIndex=rows.findIndex(r=>r.normalized.includes('total'));
                 if(totalIndex>=0)rows=rows.slice(totalIndex+1);
@@ -2188,7 +2193,10 @@ header .winner-title-line h1{display:flex!important;align-items:center!important
                     }
                     rows=best.block;
                 }
-                if(rows.length!==12)return null;
+                if(rows.length!==12){
+                    this.fullTableDiagnostic={status:'row-count',columns,headerY,rawRows,rows,found:rows.length,selected:null};
+                    return null;
+                }
 
                 // A named all-zero territory may have no OCR number glyphs. Infer zero only when all four cells are absent.
                 rows.forEach(row=>{
@@ -2196,12 +2204,19 @@ header .winner-title-line h1{display:flex!important;align-items:center!important
                     row.valid=['dailySls','mtdSls','dailyGals','mtdGals'].every(k=>Number.isFinite(row[k]))&&
                         row.mtdSls>=row.dailySls&&row.mtdGals>=row.dailyGals;
                 });
-                if(rows.some(r=>!r.valid))return null;
+                if(rows.some(r=>!r.valid)){
+                    this.fullTableDiagnostic={status:'invalid-cells',columns,headerY,rawRows,rows,found:rows.length,selected:null};
+                    return null;
+                }
 
                 const rep=clean(this.selectedRep?.name),territory=clean(this.selectedRep?.territory).replace(/^pro/,'');
                 let selected=rows.find(r=>(rep.length>=3&&r.normalized.includes(rep))||
                     (territory.length>=5&&r.normalized.includes(territory)));
-                if(!selected)return null;
+                if(!selected){
+                    this.fullTableDiagnostic={status:'selected-not-found',columns,headerY,rawRows,rows,found:rows.length,selected:null};
+                    return null;
+                }
+                this.fullTableDiagnostic={status:'complete',columns,headerY,rawRows,rows,found:rows.length,selected};
                 return {columns,headerY,rows,selected};
             }
 
@@ -2225,6 +2240,21 @@ header .winner-title-line h1{display:flex!important;align-items:center!important
                     result,rows:rows.map((r,index)=>({index:index+1,label:r.label,dailySls:r.dailySls,mtdSls:r.mtdSls,dailyGals:r.dailyGals,mtdGals:r.mtdGals}))};
                 console.log('Validated full-table territory OCR',{selected:selected.label,result,rows});
                 return result;
+            }
+
+            showFullTableReview() {
+                const prior=document.getElementById('fullTableOcrReview');if(prior)prior.remove();
+                const d=this.fullTableDiagnostic||{status:'no-table-result',rows:[]};
+                const fmt=v=>Number.isFinite(v)?Number(v).toLocaleString():'MISSING';
+                const rows=(d.rows&&d.rows.length?d.rows:(d.rawRows||[]));
+                const selected=d.selected;
+                const overlay=document.createElement('div');overlay.id='fullTableOcrReview';
+                overlay.style.cssText='position:fixed;inset:0;z-index:2147483647;background:rgba(2,6,23,.9);display:flex;align-items:center;justify-content:center;padding:12px;';
+                const body=rows.map((r,i)=>`<tr style="${selected===r?'background:#164e63;':''}${!r.valid&&d.status!=='row-count'?'background:#591c24;':''}"><td>${i+1}</td><td style="text-align:left">${String(r.label||'NO LABEL').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}</td><td>${fmt(r.dailySls)}</td><td>${fmt(r.mtdSls)}</td><td>${fmt(r.dailyGals)}</td><td>${fmt(r.mtdGals)}</td></tr>`).join('');
+                const col=(d.columns||{});const detected=Object.values(col).filter(Boolean).length;
+                overlay.innerHTML=`<section style="width:min(98vw,860px);max-height:90vh;overflow:auto;background:#0f2747;color:#eef6ff;border:2px solid #38bdf8;border-radius:16px;padding:16px;box-shadow:0 24px 70px #000"><div style="display:flex;justify-content:space-between;gap:12px;align-items:start"><div><h2 style="font-size:18px;font-weight:900;margin:0">TEMP FULL-TABLE OCR REVIEW</h2><p style="margin:5px 0 12px;color:#bfdbfe">Status: <b>${d.status}</b> · Headers: ${detected}/4 · Rows kept: ${rows.length} · Selected: <b>${selected?.label||'NOT MATCHED'}</b></p></div><button type="button" id="fullTableReviewClose" style="background:#38bdf8;color:#082f49;border:0;border-radius:9px;padding:8px 12px;font-weight:900">Close</button></div><div style="overflow:auto"><table style="width:100%;border-collapse:collapse;font:12px ui-monospace,monospace;text-align:right"><thead><tr style="background:#075985"><th>#</th><th style="text-align:left">OCR row label</th><th>Day SLS</th><th>MTD SLS</th><th>Day Gals</th><th>MTD Gals</th></tr></thead><tbody>${body||'<tr><td colspan="6" style="text-align:center;padding:18px">No report rows were reconstructed.</td></tr>'}</tbody></table></div><p style="margin:12px 0 0;color:#bae6fd">Red rows have missing or invalid cells. Blue-green is the row selected for your saved territory/representative.</p></section>`;
+                document.body.appendChild(overlay);
+                overlay.querySelector('#fullTableReviewClose').addEventListener('click',()=>overlay.remove());
             }
 
             clearExecutiveRankCards(message = 'Rank unavailable') {
