@@ -1964,43 +1964,46 @@ header .winner-title-line h1{display:flex!important;align-items:center!important
                     updateProgress('Preparing Territory Breakdown image...', 0.03);
                     const canvases = await this.prepareImagesForOcr(file);
                     const engine = await this.getMainThreadOcrEngine(updateProgress);
-                    let best = { count: 0, text: '', values: {}, ranks: null };
-
-                    for (let pass = 0; pass < canvases.length; pass++) {
-                        updateProgress(`Worker-free OCR pass ${pass + 1} of ${canvases.length}. The page may pause briefly...`, 0.20 + pass * 0.36);
-                        await new Promise(resolve => setTimeout(resolve, 30));
-                        const canvas = canvases[pass];
-                        const ctx = canvas.getContext('2d', { willReadFrequently: true });
-                        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                        engine.loadImage(imageData);
-                        const boxes = engine.getTextBoxes('word', p => updateProgress(`Reading table, pass ${pass + 1}...`, 0.22 + pass * 0.36 + p * 0.30));
-                        const words = boxes.map(item => ({
-                            text: item.text,
-                            bbox: { x0: item.rect.left, y0: item.rect.top, x1: item.rect.right, y1: item.rect.bottom }
-                        }));
-                        const text = words.map(word => word.text).join(' ');
-                        // Both values and ranks come from the same reconstructed 12-person table.
-                        const ranks = this.extractTerritoryDashboardRanks({ words }, canvas);
-                        const values = this.extractTerritoryDashboardMetrics({ words }, canvas);
-                        // Never parse arbitrary whole-report text when table reconstruction fails;
-                        // doing so can mistake company totals for the selected representative.
-                        const count = ['dailySls','dailyGals','mtdSls','mtdGals'].filter(key => Number.isFinite(values?.[key])).length;
-                        const rankCount = ['dailySales','mtdSales','dailyGals','mtdGals'].filter(key => Number.isFinite(ranks?.[key])).length;
-                        const bestRankCount = ['dailySales','mtdSales','dailyGals','mtdGals'].filter(key => Number.isFinite(best.ranks?.[key])).length;
-                        // Rank completeness is the primary score. Metric completeness breaks ties.
-                        // A pass without valid ranks must never inherit or masquerade as a ranked pass.
-                        // Prefer the latest fully validated 12-row rank pass. The previous early break
-                        // kept the first complete-looking pass (#5 Sales MTD) while diagnostics showed
-                        // the more accurate later pass (#9 Sales MTD).
-                        const validatedRankPass = rankCount === 4 && this.rankDiagnostic?.status === 'complete' && this.rankDiagnostic?.found === 12;
-                        if (validatedRankPass) {
-                            best = { count, text, values: values || {}, ranks, rankDiagnostic: structuredClone(this.rankDiagnostic) };
-                        } else if (!best.ranks && (rankCount > bestRankCount || (rankCount === bestRankCount && count > best.count) || (!best.text && text))) {
-                            best = { count, text, values: values || {}, ranks: null, rankDiagnostic: this.rankDiagnostic ? structuredClone(this.rankDiagnostic) : null };
-                        }
-                        // Do not break here: later OCR passes may contain the accurate complete rank grid.
+                    let best={count:0,text:'',values:{},ranks:null,rankDiagnostic:null};
+                    const mergedWords=[];
+                    for(let pass=0;pass<canvases.length;pass++){
+                        updateProgress(`Dual-zone OCR pass ${pass+1} of ${canvases.length}...`,.20+pass*(.62/canvases.length));
+                        await new Promise(resolve=>setTimeout(resolve,30));
+                        const canvas=canvases[pass],ctx=canvas.getContext('2d',{willReadFrequently:true});
+                        engine.loadImage(ctx.getImageData(0,0,canvas.width,canvas.height));
+                        const boxes=engine.getTextBoxes('word',p=>updateProgress(`Reading ${canvas.ocrMeta.zone} zone, pass ${pass+1}...`,.20+pass*(.62/canvases.length)+p*(.50/canvases.length)));
+                        const meta=canvas.ocrMeta;
+                        boxes.forEach(item=>{
+                            const rect=item.rect;
+                            mergedWords.push({text:item.text,bbox:{
+                                x0:rect.left/meta.scale,y0:rect.top/meta.scale+meta.sourceY,
+                                x1:rect.right/meta.scale,y1:rect.bottom/meta.scale+meta.sourceY
+                            }});
+                        });
                     }
-
+                    // Deduplicate overlapping-zone and threshold-pass words in original screenshot coordinates.
+                    const normalized=[];
+                    mergedWords.sort((x,y)=>x.bbox.y0-y.bbox.y0||x.bbox.x0-y.bbox.x0).forEach(word=>{
+                        const token=String(word.text||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+                        const cx=(word.bbox.x0+word.bbox.x1)/2,cy=(word.bbox.y0+word.bbox.y1)/2;
+                        const duplicate=normalized.find(w=>{
+                            const wt=String(w.text||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+                            const wx=(w.bbox.x0+w.bbox.x1)/2,wy=(w.bbox.y0+w.bbox.y1)/2;
+                            return token&&token===wt&&Math.abs(cx-wx)<10&&Math.abs(cy-wy)<10;
+                        });
+                        if(!duplicate)normalized.push(word);
+                    });
+                    const virtualCanvas={width:canvases[0].ocrMeta.sourceWidth,height:canvases[0].ocrMeta.sourceHeight};
+                    const text=normalized.map(w=>w.text).join(' ');
+                    const ranks=this.extractTerritoryDashboardRanks({words:normalized},virtualCanvas);
+                    const values=this.extractTerritoryDashboardMetrics({words:normalized},virtualCanvas);
+                    const count=['dailySls','dailyGals','mtdSls','mtdGals'].filter(k=>Number.isFinite(values?.[k])).length;
+                    const rankCount=['dailySales','mtdSales','dailyGals','mtdGals'].filter(k=>Number.isFinite(ranks?.[k])).length;
+                    best={count,text,values:values||{},ranks:rankCount===4?ranks:null,
+                        rankDiagnostic:this.rankDiagnostic?structuredClone(this.rankDiagnostic):null};
+                    this.dualPassDiagnostic={rawWordCount:mergedWords.length,mergedWordCount:normalized.length,
+                        lowestY:normalized.length?Math.max(...normalized.map(w=>w.bbox.y1)):null,
+                        lastWords:normalized.slice().sort((a,b)=>a.bbox.y0-b.bbox.y0).slice(-100).map(w=>w.text)};
                     if (best.rankDiagnostic) this.rankDiagnostic = best.rankDiagnostic;
                     this.showFullTableReview();
                     if (rawText) rawText.textContent = best.text || 'OCR completed but returned no readable text.';
@@ -2032,52 +2035,31 @@ header .winner-title-line h1{display:flex!important;align-items:center!important
             }
 
             async prepareImagesForOcr(file) {
-                const dataUrl = await new Promise((resolve, reject) => {
-                    const reader = new FileReader();
-                    reader.onload = () => resolve(reader.result);
-                    reader.onerror = () => reject(new Error('The selected image could not be read.'));
-                    reader.readAsDataURL(file);
-                });
-                const image = await new Promise((resolve, reject) => {
-                    const img = new Image();
-                    img.onload = () => resolve(img);
-                    img.onerror = () => reject(new Error('This browser could not decode the selected image. Try saving it as JPG or PNG.'));
-                    img.src = dataUrl;
-                });
-                if (!image.naturalWidth || !image.naturalHeight) throw new Error('The selected image has no readable dimensions.');
-
-                // Keep almost the full screenshot in the OCR canvas. The old crop ended at 53.5% of image height,
-                // so differently zoomed reports physically lost the bottom territory rows before OCR ran.
-                const cropTop = Math.round(image.naturalHeight * 0.08);
-                const cropBottom = Math.round(image.naturalHeight * 0.92);
-                const crop = {
-                    x: 0,
-                    y: cropTop,
-                    width: image.naturalWidth,
-                    height: Math.max(1, cropBottom - cropTop)
+                const dataUrl=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('The selected image could not be read.'));reader.readAsDataURL(file);});
+                const image=await new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error('This browser could not decode the selected image. Try saving it as JPG or PNG.'));img.src=dataUrl;});
+                if(!image.naturalWidth||!image.naturalHeight)throw new Error('The selected image has no readable dimensions.');
+                const maxWidth=3600;
+                const scale=Math.max(1,Math.min(2.2,maxWidth/image.naturalWidth));
+                // Two overlapping vertical OCR zones. Each zone is short enough for the engine to fully recognize,
+                // and the overlap lets the merger deduplicate rows around the center boundary.
+                const zones=[
+                    {name:'top',x:0,y:Math.round(image.naturalHeight*.06),width:image.naturalWidth,height:Math.round(image.naturalHeight*.58)},
+                    {name:'bottom',x:0,y:Math.round(image.naturalHeight*.42),width:image.naturalWidth,height:Math.round(image.naturalHeight*.56)}
+                ];
+                const build=(zone,threshold)=>{
+                    const canvas=document.createElement('canvas');
+                    canvas.width=Math.round(zone.width*scale);canvas.height=Math.round(zone.height*scale);
+                    canvas.ocrMeta={zone:zone.name,sourceY:zone.y,scale,sourceWidth:image.naturalWidth,sourceHeight:image.naturalHeight};
+                    const ctx=canvas.getContext('2d',{willReadFrequently:true});
+                    ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);
+                    ctx.drawImage(image,zone.x,zone.y,zone.width,zone.height,0,0,canvas.width,canvas.height);
+                    const pixels=ctx.getImageData(0,0,canvas.width,canvas.height),data=pixels.data;
+                    for(let i=0;i<data.length;i+=4){const gray=data[i]*.299+data[i+1]*.587+data[i+2]*.114;
+                        const value=threshold?(gray>175?255:0):Math.max(0,Math.min(255,(gray-128)*1.8+128));
+                        data[i]=data[i+1]=data[i+2]=value;data[i+3]=255;}
+                    ctx.putImageData(pixels,0,0);return canvas;
                 };
-                const maxWidth = 3600;
-                const scale = Math.max(1, Math.min(2.2, maxWidth / crop.width));
-                const buildCanvas = threshold => {
-                    const canvas = document.createElement('canvas');
-                    canvas.width = Math.round(crop.width * scale);
-                    canvas.height = Math.round(crop.height * scale);
-                    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-                    ctx.fillStyle = '#ffffff';
-                    ctx.fillRect(0, 0, canvas.width, canvas.height);
-                    ctx.drawImage(image, crop.x, crop.y, crop.width, crop.height, 0, 0, canvas.width, canvas.height);
-                    const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                    const data = pixels.data;
-                    for (let i = 0; i < data.length; i += 4) {
-                        const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-                        const value = threshold ? (gray > 175 ? 255 : 0) : Math.max(0, Math.min(255, (gray - 128) * 1.8 + 128));
-                        data[i] = data[i + 1] = data[i + 2] = value;
-                        data[i + 3] = 255;
-                    }
-                    ctx.putImageData(pixels, 0, 0);
-                    return canvas;
-                };
-                return [buildCanvas(false), buildCanvas(true)];
+                return zones.flatMap(zone=>[build(zone,false),build(zone,true)]);
             }
 
             flattenOcrWords(ocrData) {
@@ -2266,8 +2248,8 @@ header .winner-title-line h1{display:flex!important;align-items:center!important
                 const overlay=document.createElement('div');overlay.id='fullTableOcrReview';
                 overlay.style.cssText='position:fixed;inset:0;z-index:2147483647;background:rgba(2,6,23,.9);display:flex;align-items:center;justify-content:center;padding:12px;';
                 const body=rows.map((r,i)=>`<tr style="${selected===r?'background:#164e63;':''}${!r.valid&&d.status!=='row-count'?'background:#591c24;':''}"><td>${i+1}</td><td>${Number.isFinite(r.y)?r.y.toFixed(1):'—'}</td><td style="text-align:left">${String(r.label||'NO LABEL').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}</td><td>${fmt(r.dailySls)}</td><td>${fmt(r.mtdSls)}</td><td>${fmt(r.dailyGals)}</td><td>${fmt(r.mtdGals)}</td></tr>`).join('');
-                const col=(d.columns||{});const detected=Object.values(col).filter(Boolean).length;
-                overlay.innerHTML=`<section style="width:min(98vw,860px);max-height:90vh;overflow:auto;background:#0f2747;color:#eef6ff;border:2px solid #38bdf8;border-radius:16px;padding:16px;box-shadow:0 24px 70px #000"><div style="display:flex;justify-content:space-between;gap:12px;align-items:start"><div><h2 style="font-size:18px;font-weight:900;margin:0">TEMP FULL-TABLE OCR REVIEW</h2><p style="margin:5px 0 12px;color:#bfdbfe">Status: <b>${d.status}</b> · Full-height scan · Headers: ${detected}/4 · Rows kept: ${rows.length} · Selected: <b>${selected?.label||'NOT MATCHED'}</b></p></div><button type="button" id="fullTableReviewClose" style="background:#38bdf8;color:#082f49;border:0;border-radius:9px;padding:8px 12px;font-weight:900">Close</button></div><div style="overflow:auto"><table style="width:100%;border-collapse:collapse;font:12px ui-monospace,monospace;text-align:right"><thead><tr style="background:#075985"><th>#</th><th>Y</th><th style="text-align:left">OCR row label</th><th>Day SLS</th><th>MTD SLS</th><th>Day Gals</th><th>MTD Gals</th></tr></thead><tbody>${body||'<tr><td colspan="7" style="text-align:center;padding:18px">No report rows were reconstructed.</td></tr>'}</tbody></table></div><p style="margin:12px 0 0;color:#bae6fd">Red rows have missing or invalid cells. Blue-green is the row selected for your saved territory/representative.</p></section>`;
+                const col=(d.columns||{});const detected=Object.values(col).filter(Boolean).length;const dual=this.dualPassDiagnostic||{};
+                overlay.innerHTML=`<section style="width:min(98vw,860px);max-height:90vh;overflow:auto;background:#0f2747;color:#eef6ff;border:2px solid #38bdf8;border-radius:16px;padding:16px;box-shadow:0 24px 70px #000"><div style="display:flex;justify-content:space-between;gap:12px;align-items:start"><div><h2 style="font-size:18px;font-weight:900;margin:0">TEMP FULL-TABLE OCR REVIEW</h2><p style="margin:5px 0 12px;color:#bfdbfe">Status: <b>${d.status}</b> · Dual-zone scan · Headers: ${detected}/4 · Rows kept: ${rows.length} · OCR words: ${dual.mergedWordCount??'—'} · Lowest Y: ${Number.isFinite(dual.lowestY)?dual.lowestY.toFixed(1):'—'} · Selected: <b>${selected?.label||'NOT MATCHED'}</b></p></div><button type="button" id="fullTableReviewClose" style="background:#38bdf8;color:#082f49;border:0;border-radius:9px;padding:8px 12px;font-weight:900">Close</button></div><div style="overflow:auto"><table style="width:100%;border-collapse:collapse;font:12px ui-monospace,monospace;text-align:right"><thead><tr style="background:#075985"><th>#</th><th>Y</th><th style="text-align:left">OCR row label</th><th>Day SLS</th><th>MTD SLS</th><th>Day Gals</th><th>MTD Gals</th></tr></thead><tbody>${body||'<tr><td colspan="7" style="text-align:center;padding:18px">No report rows were reconstructed.</td></tr>'}</tbody></table></div><p style="margin:12px 0 0;color:#bae6fd">Red rows have missing or invalid cells. Blue-green is the row selected for your saved territory/representative.</p></section>`;
                 document.body.appendChild(overlay);
                 overlay.querySelector('#fullTableReviewClose').addEventListener('click',()=>overlay.remove());
             }
