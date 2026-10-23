@@ -1,3 +1,0 @@
-Sales Tracker PWA R3
-
-Upload and extract ALL files to one HTTPS web folder. Do not open index.html from Downloads or a ZIP preview. Open the published HTTPS address in Android Chrome.
