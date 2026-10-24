@@ -5758,5 +5758,21 @@ window.addEventListener('pageshow',restore);
   clean();
   addEventListener('pageshow',clean);
 })();
-</script></body>
+</script>
+<style id="mobile-header-stack-repair">
+@media(max-width:768px){
+html body header.bg-slate-800{display:flex!important;flex-direction:column!important;align-items:stretch!important;justify-content:flex-start!important;gap:12px!important;width:100%!important;max-width:100%!important;min-width:0!important;height:auto!important;flex-shrink:0!important;padding:12px!important;box-sizing:border-box!important;overflow:visible!important;}
+html body header.bg-slate-800>div:first-child{display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;width:100%!important;min-width:0!important;margin:0!important;overflow:visible!important;}
+html body header.bg-slate-800>div:first-child>.min-w-0{width:100%!important;min-width:0!important;text-align:center!important;}
+html body header.bg-slate-800 .winner-title-line,html body header.bg-slate-800 h1{display:flex!important;justify-content:center!important;align-items:center!important;width:100%!important;min-width:0!important;overflow:visible!important;}
+html body header.bg-slate-800 #v3210WestIsBestHeaderLogo{display:block!important;max-width:100%!important;margin:0 auto!important;}
+html body header.bg-slate-800 #headerRepSubtitle{text-align:center!important;white-space:normal!important;}
+html body header.bg-slate-800 #headerActions{flex-direction:row!important;flex-wrap:wrap!important;align-items:center!important;justify-content:center!important;width:100%!important;max-width:100%!important;min-width:0!important;gap:10px!important;margin:0!important;box-sizing:border-box!important;}
+html body header.bg-slate-800 #headerActions #execRankWrap{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;flex:0 0 100%!important;width:100%!important;max-width:100%!important;min-width:0!important;order:-1!important;gap:10px!important;margin:0!important;box-sizing:border-box!important;}
+html body header.bg-slate-800 #execRankWrap .execCard{width:100%!important;max-width:100%!important;min-width:0!important;box-sizing:border-box!important;}
+html body header.bg-slate-800 #headerActions>button{margin:0!important;}
+html body header.bg-slate-800 #headerActions>button span{display:inline!important;}
+}
+</style>
+</body>
 </html>
