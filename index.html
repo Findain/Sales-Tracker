@@ -897,7 +897,7 @@ header .winner-title-line h1{display:flex!important;align-items:center!important
 <button class="bg-slate-700 hover:bg-slate-600 text-slate-300 px-3.5 py-2 rounded-xl text-xs font-medium transition" onclick="appState.closeUploadModal()">
                     Cancel
                 </button>
-<button class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl text-xs font-semibold transition shadow-lg" onclick="appState.saveDailyRecord()">
+<button class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl text-xs font-semibold transition shadow-lg" id="saveDailyRecordBtn" type="button">
                     Save Daily Record
                 </button>
 </div>
@@ -5776,7 +5776,7 @@ function rows(a,shots){
  }
  return [...map.values()].sort((a,b)=>b.date.localeCompare(a.date));
 }
-function refreshCount(){const a=app();if(!a)return;const node=document.getElementById('screenshotArchiveCount');if(node){const count=String(rows(a,[]).length);if(node.textContent!==count)node.textContent=count;}}
+function refreshCount(){const a=app();if(!a)return;const node=document.getElementById('screenshotArchiveCount');if(node)node.textContent=rows(a,[]).length;}
 window.openScreenshotArchive=async function(){
  const a=app();if(!a)return;let shots=[],archiveUnavailable=false;
  try{shots=await window.ScreenshotArchive.all();}catch(e){archiveUnavailable=true;console.warn('Screenshot archive unavailable; saved entries remain visible.',e);}
@@ -5795,10 +5795,134 @@ window.openScreenshotArchive=async function(){
  }
  const modal=document.getElementById('screenshotArchiveModal');modal.classList.add('is-open');modal.setAttribute('aria-hidden','false');refreshCount();
 };
-function install(){const a=app();if(!a||a.__v3228EntryLog)return;const original=a.renderDashboard;if(typeof original!=='function')return;a.renderDashboard=function(){const result=original.apply(this,arguments);refreshCount();return result;};a.__v3228EntryLog=true;const countNode=document.getElementById('screenshotArchiveCount');if(countNode)new MutationObserver(refreshCount).observe(countNode,{childList:true,characterData:true,subtree:true});refreshCount();}
+function install(){const a=app();if(!a||a.__v3228EntryLog)return;const original=a.renderDashboard;if(typeof original!=='function')return;a.renderDashboard=function(){const result=original.apply(this,arguments);refreshCount();return result;};a.__v3228EntryLog=true;refreshCount();}
 window.SalesTrackerEntryLog={rows,refreshCount};
 if(document.readyState==='loading')window.addEventListener('DOMContentLoaded',install);else install();
 })();
+</script>
+<script id="v3229-first-attempt-save-controller">
+(function(root){
+  'use strict';
+  const PATCH='V3.2.29 First-Attempt Daily Save Controller';
+  const COMMIT_KEY='sw_tracker_daily_commit_v3210';
+  const FIELD_IDS=['inputDailySls','inputDailyGals','inputMtdSls','inputMtdGals'];
+  let running=false;
+
+  const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+  const safeParse=value=>{try{return JSON.parse(value||'null');}catch(error){return null;}};
+  const localDate=value=>{
+    const match=String(value||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if(!match)return null;
+    const date=new Date(Number(match[1]),Number(match[2])-1,Number(match[3]));
+    return date.getFullYear()===Number(match[1])&&date.getMonth()===Number(match[2])-1&&date.getDate()===Number(match[3])?date:null;
+  };
+  const dateKey=date=>date.getFullYear()+'-'+String(date.getMonth()+1).padStart(2,'0')+'-'+String(date.getDate()).padStart(2,'0');
+  const reportingDate=value=>root.SalesTrackerPacing?.reportingDateFromReference?.(value)||(()=>{const date=localDate(value);if(!date)return '';date.setDate(date.getDate()-2);return dateKey(date);})();
+  const numberValue=id=>{const node=document.getElementById(id),raw=node?.value;const value=Number(raw);return raw!==undefined&&raw!==null&&String(raw).trim()!==''&&Number.isFinite(value)?value:0;};
+  const fieldMetrics=()=>{const sales=numberValue('inputDailySls'),gals=numberValue('inputDailyGals');return {sales,gals,mtdSales:numberValue('inputMtdSls')||sales,mtdGals:numberValue('inputMtdGals')||gals};};
+  const equal=(left,right)=>Math.abs(Number(left||0)-Number(right||0))<0.000001;
+  const metricsEqual=(left,right)=>!!left&&!!right&&['sales','gals','mtdSales','mtdGals'].every(key=>equal(left[key],right[key]));
+  const persistedMatches=(app,key,expected)=>{
+    if(!key||!expected)return false;
+    const memory=app?.dailyRecords?.[key];
+    const mirror=safeParse(localStorage.getItem('sw_tracker_dailyRecords'))?.[key];
+    const committed=safeParse(localStorage.getItem(COMMIT_KEY))?.dailyRecords?.[key];
+    return metricsEqual(memory,expected)&&metricsEqual(mirror,expected)&&metricsEqual(committed,expected);
+  };
+  const afterFrame=()=>new Promise(resolve=>(root.requestAnimationFrame||setTimeout)(resolve,0));
+  async function flushMobileFields(){
+    const active=document.activeElement;
+    if(active&&FIELD_IDS.includes(active.id))active.blur?.();
+    for(const id of FIELD_IDS){
+      const node=document.getElementById(id);
+      if(!node)continue;
+      node.dispatchEvent(new Event('input',{bubbles:true}));
+      node.dispatchEvent(new Event('change',{bubbles:true}));
+    }
+    await Promise.resolve();
+    await afterFrame();
+  }
+  async function readyApp(){
+    const deadline=Date.now()+5000;
+    while(Date.now()<deadline){
+      const app=root.appState;
+      if(app?.__v3210DailyCommitInstalled&&app?.__v3210ArchiveReconciliationInstalled&&typeof app.saveDailyRecord==='function')return app;
+      await pause(25);
+    }
+    const app=root.appState;
+    if(app?.__v3210DailyCommitInstalled&&typeof app.saveDailyRecord==='function')return app;
+    throw new Error('The daily-entry save controller is still starting. Please keep this window open and try again.');
+  }
+  async function invokeWithConfirmTracking(app){
+    let declined=false;
+    const nativeConfirm=root.confirm;
+    if(typeof nativeConfirm==='function')root.confirm=function(message){const accepted=nativeConfirm.call(root,message);if(!accepted)declined=true;return accepted;};
+    try{await app.saveDailyRecord();}
+    finally{if(typeof nativeConfirm==='function')root.confirm=nativeConfirm;}
+    return declined;
+  }
+  async function commitFromOneUserAction(event){
+    event?.preventDefault?.();
+    event?.stopImmediatePropagation?.();
+    if(running)return;
+    running=true;
+    const button=event?.currentTarget||document.getElementById('saveDailyRecordBtn');
+    if(button){button.disabled=true;button.setAttribute('aria-busy','true');}
+    try{
+      const app=await readyApp();
+      await flushMobileFields();
+      const selectedDate=document.getElementById('recordDateInput')?.value||'';
+      const key=reportingDate(selectedDate);
+      const expected=fieldMetrics();
+      if(!key){app.showToast?.('Please specify a valid screenshot reference date.','error');return;}
+
+      const declined=await invokeWithConfirmTracking(app);
+      await Promise.resolve();
+      if(!declined&&!persistedMatches(app,key,expected)&&app.__v3210DailyFlow?.status!=='error'){
+        // A single bounded internal retry repairs the historical first-click race without
+        // requiring the user to re-enter values or press Save a second time.
+        await flushMobileFields();
+        await invokeWithConfirmTracking(app);
+      }
+      if(!declined&&!persistedMatches(app,key,expected)){
+        app.showToast?.('The daily entry was not confirmed in browser storage. The form remains available so no values are lost.','error');
+      }
+    }catch(error){
+      console.error(PATCH,error);
+      root.appState?.showToast?.(error?.message||'The daily entry could not be saved.','error');
+    }finally{
+      running=false;
+      if(button){
+        const flow=root.appState?.__v3210DailyFlow;
+        if(flow?.status!=='error')button.disabled=false;
+        button.setAttribute('aria-busy','false');
+      }
+    }
+  }
+  function install(){
+    const button=document.getElementById('saveDailyRecordBtn')||document.querySelector('#uploadModal button[onclick*="saveDailyRecord"]');
+    if(!button||button.dataset.firstAttemptSaveController==='true')return false;
+    button.id='saveDailyRecordBtn';
+    button.type='button';
+    button.removeAttribute('onclick');
+    button.dataset.firstAttemptSaveController='true';
+    button.addEventListener('click',commitFromOneUserAction,true);
+    return true;
+  }
+  function runTests(){
+    const cases=[
+      reportingDate('2026-11-13')==='2026-11-11',
+      metricsEqual({sales:1,gals:2,mtdSales:3,mtdGals:4},{sales:1,gals:2,mtdSales:3,mtdGals:4}),
+      !metricsEqual({sales:1,gals:2,mtdSales:3,mtdGals:4},{sales:9,gals:2,mtdSales:3,mtdGals:4})
+    ];
+    return {version:PATCH,passed:cases.every(Boolean),total:cases.length,results:cases};
+  }
+  root.SalesTrackerFirstAttemptSaveFix={version:PATCH,install,commitFromOneUserAction,reportingDate,fieldMetrics,metricsEqual,persistedMatches,runTests};
+  root.SalesTrackerFirstAttemptSaveFix.testResults=runTests();
+  if(document.readyState==='loading')root.addEventListener('DOMContentLoaded',install);else install();
+  const observer=new MutationObserver(()=>{if(install())observer.disconnect();});
+  observer.observe(document.documentElement,{childList:true,subtree:true});
+})(window);
 </script>
 </body>
 </html>
