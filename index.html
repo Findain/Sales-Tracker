@@ -5800,128 +5800,88 @@ window.SalesTrackerEntryLog={rows,refreshCount};
 if(document.readyState==='loading')window.addEventListener('DOMContentLoaded',install);else install();
 })();
 </script>
-<script id="v3229-first-attempt-save-controller">
+<script id="v3230-first-press-manual-save">
 (function(root){
-  'use strict';
-  const PATCH='V3.2.29 First-Attempt Daily Save Controller';
-  const COMMIT_KEY='sw_tracker_daily_commit_v3210';
-  const FIELD_IDS=['inputDailySls','inputDailyGals','inputMtdSls','inputMtdGals'];
-  let running=false;
-
-  const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-  const safeParse=value=>{try{return JSON.parse(value||'null');}catch(error){return null;}};
-  const localDate=value=>{
-    const match=String(value||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if(!match)return null;
-    const date=new Date(Number(match[1]),Number(match[2])-1,Number(match[3]));
-    return date.getFullYear()===Number(match[1])&&date.getMonth()===Number(match[2])-1&&date.getDate()===Number(match[3])?date:null;
-  };
-  const dateKey=date=>date.getFullYear()+'-'+String(date.getMonth()+1).padStart(2,'0')+'-'+String(date.getDate()).padStart(2,'0');
-  const reportingDate=value=>root.SalesTrackerPacing?.reportingDateFromReference?.(value)||(()=>{const date=localDate(value);if(!date)return '';date.setDate(date.getDate()-2);return dateKey(date);})();
-  const numberValue=id=>{const node=document.getElementById(id),raw=node?.value;const value=Number(raw);return raw!==undefined&&raw!==null&&String(raw).trim()!==''&&Number.isFinite(value)?value:0;};
-  const fieldMetrics=()=>{const sales=numberValue('inputDailySls'),gals=numberValue('inputDailyGals');return {sales,gals,mtdSales:numberValue('inputMtdSls')||sales,mtdGals:numberValue('inputMtdGals')||gals};};
-  const equal=(left,right)=>Math.abs(Number(left||0)-Number(right||0))<0.000001;
-  const metricsEqual=(left,right)=>!!left&&!!right&&['sales','gals','mtdSales','mtdGals'].every(key=>equal(left[key],right[key]));
-  const persistedMatches=(app,key,expected)=>{
-    if(!key||!expected)return false;
-    const memory=app?.dailyRecords?.[key];
-    const mirror=safeParse(localStorage.getItem('sw_tracker_dailyRecords'))?.[key];
-    const committed=safeParse(localStorage.getItem(COMMIT_KEY))?.dailyRecords?.[key];
-    return metricsEqual(memory,expected)&&metricsEqual(mirror,expected)&&metricsEqual(committed,expected);
-  };
-  const afterFrame=()=>new Promise(resolve=>(root.requestAnimationFrame||setTimeout)(resolve,0));
-  async function flushMobileFields(){
-    const active=document.activeElement;
-    if(active&&FIELD_IDS.includes(active.id))active.blur?.();
-    for(const id of FIELD_IDS){
-      const node=document.getElementById(id);
-      if(!node)continue;
-      node.dispatchEvent(new Event('input',{bubbles:true}));
-      node.dispatchEvent(new Event('change',{bubbles:true}));
-    }
-    await Promise.resolve();
-    await afterFrame();
-  }
-  async function readyApp(){
-    const deadline=Date.now()+5000;
-    while(Date.now()<deadline){
-      const app=root.appState;
-      if(app?.__v3210DailyCommitInstalled&&app?.__v3210ArchiveReconciliationInstalled&&typeof app.saveDailyRecord==='function')return app;
-      await pause(25);
-    }
-    const app=root.appState;
-    if(app?.__v3210DailyCommitInstalled&&typeof app.saveDailyRecord==='function')return app;
-    throw new Error('The daily-entry save controller is still starting. Please keep this window open and try again.');
-  }
-  async function invokeWithConfirmTracking(app){
-    let declined=false;
-    const nativeConfirm=root.confirm;
-    if(typeof nativeConfirm==='function')root.confirm=function(message){const accepted=nativeConfirm.call(root,message);if(!accepted)declined=true;return accepted;};
-    try{await app.saveDailyRecord();}
-    finally{if(typeof nativeConfirm==='function')root.confirm=nativeConfirm;}
-    return declined;
-  }
-  async function commitFromOneUserAction(event){
-    event?.preventDefault?.();
-    event?.stopImmediatePropagation?.();
-    if(running)return;
-    running=true;
-    const button=event?.currentTarget||document.getElementById('saveDailyRecordBtn');
-    if(button){button.disabled=true;button.setAttribute('aria-busy','true');}
-    try{
-      const app=await readyApp();
-      await flushMobileFields();
-      const selectedDate=document.getElementById('recordDateInput')?.value||'';
-      const key=reportingDate(selectedDate);
-      const expected=fieldMetrics();
-      if(!key){app.showToast?.('Please specify a valid screenshot reference date.','error');return;}
-
-      const declined=await invokeWithConfirmTracking(app);
-      await Promise.resolve();
-      if(!declined&&!persistedMatches(app,key,expected)&&app.__v3210DailyFlow?.status!=='error'){
-        // A single bounded internal retry repairs the historical first-click race without
-        // requiring the user to re-enter values or press Save a second time.
-        await flushMobileFields();
-        await invokeWithConfirmTracking(app);
-      }
-      if(!declined&&!persistedMatches(app,key,expected)){
-        app.showToast?.('The daily entry was not confirmed in browser storage. The form remains available so no values are lost.','error');
-      }
-    }catch(error){
-      console.error(PATCH,error);
-      root.appState?.showToast?.(error?.message||'The daily entry could not be saved.','error');
-    }finally{
-      running=false;
-      if(button){
-        const flow=root.appState?.__v3210DailyFlow;
-        if(flow?.status!=='error')button.disabled=false;
-        button.setAttribute('aria-busy','false');
-      }
-    }
-  }
-  function install(){
-    const button=document.getElementById('saveDailyRecordBtn')||document.querySelector('#uploadModal button[onclick*="saveDailyRecord"]');
-    if(!button||button.dataset.firstAttemptSaveController==='true')return false;
-    button.id='saveDailyRecordBtn';
-    button.type='button';
-    button.removeAttribute('onclick');
-    button.dataset.firstAttemptSaveController='true';
-    button.addEventListener('click',commitFromOneUserAction,true);
-    return true;
-  }
-  function runTests(){
-    const cases=[
-      reportingDate('2026-11-13')==='2026-11-11',
-      metricsEqual({sales:1,gals:2,mtdSales:3,mtdGals:4},{sales:1,gals:2,mtdSales:3,mtdGals:4}),
-      !metricsEqual({sales:1,gals:2,mtdSales:3,mtdGals:4},{sales:9,gals:2,mtdSales:3,mtdGals:4})
-    ];
-    return {version:PATCH,passed:cases.every(Boolean),total:cases.length,results:cases};
-  }
-  root.SalesTrackerFirstAttemptSaveFix={version:PATCH,install,commitFromOneUserAction,reportingDate,fieldMetrics,metricsEqual,persistedMatches,runTests};
-  root.SalesTrackerFirstAttemptSaveFix.testResults=runTests();
-  if(document.readyState==='loading')root.addEventListener('DOMContentLoaded',install);else install();
-  const observer=new MutationObserver(()=>{if(install())observer.disconnect();});
-  observer.observe(document.documentElement,{childList:true,subtree:true});
+'use strict';
+const PATCH='V3.2.30 First-Press Manual Entry Commit';
+const COMMIT_KEY='sw_tracker_daily_commit_v3210';
+const METRICS=['sales','gals','mtdSales','mtdGals'];
+let running=false,lastPointerCommit=0,commitCount=0;
+const safeParse=(value,fallback=null)=>{try{return value==null?fallback:JSON.parse(value);}catch(error){return fallback;}};
+const finite=value=>Number.isFinite(Number(value));
+const equal=(left,right)=>Math.abs(Number(left||0)-Number(right||0))<0.000001;
+const metricsEqual=(left,right)=>!!left&&!!right&&METRICS.every(key=>equal(left[key],right[key]));
+const localDate=value=>{const match=String(value||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);if(!match)return null;const date=new Date(Number(match[1]),Number(match[2])-1,Number(match[3]));return date.getFullYear()===Number(match[1])&&date.getMonth()===Number(match[2])-1&&date.getDate()===Number(match[3])?date:null;};
+const dateKey=date=>date.getFullYear()+'-'+String(date.getMonth()+1).padStart(2,'0')+'-'+String(date.getDate()).padStart(2,'0');
+const reportingDate=value=>root.SalesTrackerPacing?.reportingDateFromReference?.(value)||(()=>{const date=localDate(value);if(!date)return '';date.setDate(date.getDate()-2);return dateKey(date);})();
+const nice=value=>{const date=localDate(value);return date?date.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}):String(value||'');};
+const raw=id=>String(document.getElementById(id)?.value??'').trim();
+const number=id=>{const value=Number(raw(id));return raw(id)!==''&&Number.isFinite(value)?value:0;};
+const formMetrics=()=>{const sales=number('inputDailySls'),gals=number('inputDailyGals');return {sales,gals,mtdSales:number('inputMtdSls')||sales,mtdGals:number('inputMtdGals')||gals};};
+const verify=(app,key,expected)=>{const memory=app.dailyRecords?.[key],mirror=safeParse(localStorage.getItem('sw_tracker_dailyRecords'),{})?.[key],committed=safeParse(localStorage.getItem(COMMIT_KEY),{})?.dailyRecords?.[key];return metricsEqual(memory,expected)&&metricsEqual(mirror,expected)&&metricsEqual(committed,expected);};
+function latestForMonth(records,date){return Object.keys(records||{}).filter(key=>{const item=localDate(key);return item&&item.getFullYear()===date.getFullYear()&&item.getMonth()===date.getMonth();}).sort().pop()||'';}
+function applyMonthly(app,key,next,records){
+ const date=localDate(key);if(!date||latestForMonth(records,date)!==key)return false;
+ const month=date.getMonth();let updated=false;
+ const apply=(kind,candidate,explicit)=>{
+  const override=app.getManualActualOverride?.(kind,month,date.getFullYear());
+  if(override&&(!override.supersedesThroughDate||key<=override.supersedesThroughDate))return;
+  const existing=Number(app.actuals?.[kind]?.[month])||0,value=Number(candidate);
+  if(!explicit||!Number.isFinite(value)||value<=0||(existing>0&&value<existing))return;
+  app.actuals[kind][month]=value;updated=true;
+  if(override&&key>override.supersedesThroughDate&&app.manualActualOverrides?.[kind])app.manualActualOverrides[kind][month]=null;
+ };
+ apply('sales',next.mtdSales,raw('inputMtdSls')!==''&&Number(raw('inputMtdSls'))>0);
+ apply('gals',next.mtdGals,raw('inputMtdGals')!==''&&Number(raw('inputMtdGals'))>0);
+ return updated;
+}
+function commitManual(app){
+ const selectedDate=raw('recordDateInput'),key=reportingDate(selectedDate);
+ if(!key)throw new Error('Please specify a valid screenshot reference date.');
+ const next=formMetrics(),previous=app.dailyRecords?.[key]||null;
+ const other=Object.entries(app.dailyRecords||{}).find(([date,record])=>date!==key&&metricsEqual(record,next));
+ if(other&&!root.confirm(`Duplicate values detected.\n\nAll four values match the entry for ${nice(other[0])}.\nYou are attempting to save them for ${nice(key)}.\n\nChoose OK only if the values are intentionally unchanged.`))return {cancelled:true,key,next};
+ const date=localDate(key),prior=Object.entries(app.dailyRecords||{}).filter(([saved])=>{const item=localDate(saved);return saved<key&&item&&date&&item.getFullYear()===date.getFullYear()&&item.getMonth()===date.getMonth();}).sort((left,right)=>right[0].localeCompare(left[0]))[0];
+ if(prior&&(next.mtdSales<Number(prior[1].mtdSales||0)||next.mtdGals<Number(prior[1].mtdGals||0))){const issues=[];if(next.mtdSales<Number(prior[1].mtdSales||0))issues.push(`MTD Sales: ${next.mtdSales.toLocaleString()} is below ${Number(prior[1].mtdSales||0).toLocaleString()}`);if(next.mtdGals<Number(prior[1].mtdGals||0))issues.push(`MTD Gallons: ${next.mtdGals.toLocaleString()} is below ${Number(prior[1].mtdGals||0).toLocaleString()}`);if(!root.confirm(`Cumulative value regression detected.\n\nCompared with ${nice(prior[0])}:\n${issues.join('\n')}\n\nChoose OK only to override this protection.`))return {cancelled:true,key,next};}
+ const record={...next,screenshotId:null,entryMode:'manual',savedAt:new Date().toISOString(),version:'V3.2.30'};
+ const beforeRecords=app.dailyRecords,beforeActuals={...app.actuals,sales:[...(app.actuals?.sales||[])],gals:[...(app.actuals?.gals||[])]},beforeMonth=app.activeMonth;
+ try{
+  app.dailyRecords={...(app.dailyRecords||{}),[key]:record};
+  const monthlyUpdated=applyMonthly(app,key,next,app.dailyRecords);
+  if(date){app.activeMonth=date.getMonth();const month=document.getElementById('activeMonthSelect');if(month)month.value=String(app.activeMonth);}
+  if(app.saveState()!==true)throw new Error('Browser storage did not confirm the daily entry.');
+  if(!verify(app,key,record))throw new Error('The saved entry did not match the form values.');
+  app.loadSavedStateData();
+  if(!verify(app,key,record))throw new Error('Reload verification did not reproduce the daily entry.');
+  app.renderDashboard();
+  window.SalesTrackerEntryLog?.refreshCount?.();
+  app.closeUploadModal();
+  commitCount++;
+  app.showToast(previous?(monthlyUpdated?`Existing entry for ${nice(key)} updated and verified. Monthly actuals were recalculated.`:`Existing entry for ${nice(key)} updated and verified.`):(monthlyUpdated?`Saved ${nice(selectedDate)} to reporting date ${nice(key)}. Monthly actuals updated.`:`Saved ${nice(selectedDate)} to reporting date ${nice(key)}.`),'success');
+  return {saved:true,key,record,monthlyUpdated};
+ }catch(error){
+  app.dailyRecords=beforeRecords;app.actuals=beforeActuals;app.activeMonth=beforeMonth;
+  throw error;
+ }
+}
+function modeIsManual(app){const modal=document.getElementById('uploadModal');return (modal?.dataset.entryMode||app?.__v3210DailyFlow?.mode||'manual')!=='ocr';}
+function handle(event){
+ if(event.type==='click'&&Date.now()-lastPointerCommit<800){event.preventDefault();event.stopImmediatePropagation();return;}
+ if(event.type==='pointerup')lastPointerCommit=Date.now();
+ event.preventDefault();event.stopImmediatePropagation();
+ if(running)return;
+ const app=root.appState;
+ if(!app||typeof app.saveState!=='function'){root.setTimeout(()=>handle({type:'click',preventDefault(){},stopImmediatePropagation(){}}),50);return;}
+ if(!modeIsManual(app)){Promise.resolve(app.saveDailyRecord()).catch(error=>{console.error(PATCH,error);app.showToast?.(error?.message||'The OCR entry could not be saved.','error');});return;}
+ running=true;const button=event.currentTarget||document.getElementById('saveDailyRecordBtn');
+ try{document.activeElement?.blur?.();if(button){button.disabled=true;button.setAttribute('aria-busy','true');button.textContent='Saving & Verifying…';}commitManual(app);}
+ catch(error){console.error(PATCH,error);app.showToast?.(error?.message||'The daily entry could not be saved. The form remains open.','error');}
+ finally{running=false;if(button){button.disabled=false;button.setAttribute('aria-busy','false');button.textContent='Save Daily Record';}}
+}
+function install(){const button=document.getElementById('saveDailyRecordBtn')||document.querySelector('#uploadModal button[onclick*="saveDailyRecord"]');if(!button||button.dataset.v3230ManualSave==='true')return false;button.id='saveDailyRecordBtn';button.type='button';button.removeAttribute('onclick');button.dataset.v3230ManualSave='true';button.addEventListener('pointerup',handle,true);button.addEventListener('click',handle,true);return true;}
+root.SalesTrackerManualSaveV3230={version:PATCH,install,commitManual,formMetrics,reportingDate,verify,get commitCount(){return commitCount;}};
+if(document.readyState==='loading')root.addEventListener('DOMContentLoaded',install);else install();
+new MutationObserver(install).observe(document.documentElement,{childList:true,subtree:true});
 })(window);
 </script>
 </body>
