@@ -2271,7 +2271,11 @@ header .winner-title-line h1{display:flex!important;align-items:center!important
                 };
                 set('salesExecCard','salesRankNum','dailySalesRankNum',ranks.mtdSales,ranks.dailySales);
                 set('galsExecCard','galsRankNum','dailyGalsRankNum',ranks.mtdGals,ranks.dailyGals);
-                try { localStorage.setItem('sw_tracker_live_ranks', JSON.stringify({...ranks,updated:new Date().toISOString()})); } catch(e) {}
+                try {
+                    const sourceReferenceDate=document.getElementById('recordDateInput')?.value||localDateKey(new Date());
+                    const sourceReportingDate=window.SalesTrackerPacing?.reportingDateFromReference?.(sourceReferenceDate)||localDateKey(getCurrentReportingDate(new Date(sourceReferenceDate+'T00:00:00')));
+                    localStorage.setItem('sw_tracker_live_ranks', JSON.stringify({...ranks,sourceReferenceDate,sourceReportingDate,updated:new Date().toISOString()}));
+                } catch(e) {}
             }
 
             extractDailyMetrics(ocrText) {
@@ -5558,7 +5562,6 @@ function restore(){
   try{
     var saved=JSON.parse(localStorage.getItem('sw_tracker_live_ranks')||'null');
     if(!saved)return;
-    if(window.appState&&typeof window.appState.updateExecutiveRankCards==='function')window.appState.updateExecutiveRankCards(saved);
     applySaved(saved);
   }catch(e){console.warn('Rank restore skipped:',e);}
 }
@@ -5882,6 +5885,81 @@ function install(){const button=document.getElementById('saveDailyRecordBtn')||d
 root.SalesTrackerManualSaveV3230={version:PATCH,install,commitManual,formMetrics,reportingDate,verify,get commitCount(){return commitCount;}};
 if(document.readyState==='loading')root.addEventListener('DOMContentLoaded',install);else install();
 new MutationObserver(install).observe(document.documentElement,{childList:true,subtree:true});
+})(window);
+</script>
+<style id="v3231-rank-freshness-style">
+#execRankWrap .execCard.rank-stale{--rank-tier:#64748b!important;border-color:rgba(148,163,184,.35)!important;box-shadow:0 8px 22px rgba(0,0,0,.22)!important}
+#execRankWrap .execCard.rank-stale::before{background:#64748b!important;box-shadow:none!important}
+#execRankWrap .execCard.rank-stale .execRank{color:#94a3b8!important;text-shadow:none!important}
+#execRankWrap .execCard.rank-stale .execDivider{background:rgba(148,163,184,.25)!important}
+</style>
+<script id="v3231-rank-freshness-controller">
+(function(root){
+'use strict';
+const VERSION='V3.2.31 Rank Freshness';
+const KEY='sw_tracker_live_ranks';
+let rolloverTimer=0;
+const safeRead=()=>{try{return JSON.parse(localStorage.getItem(KEY)||'null');}catch(error){return null;}};
+const localDate=value=>{const match=String(value||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);if(!match)return null;const date=new Date(Number(match[1]),Number(match[2])-1,Number(match[3]));return date.getFullYear()===Number(match[1])&&date.getMonth()===Number(match[2])-1&&date.getDate()===Number(match[3])?date:null;};
+const dateKey=date=>date.getFullYear()+'-'+String(date.getMonth()+1).padStart(2,'0')+'-'+String(date.getDate()).padStart(2,'0');
+const now=()=>root.__salesTrackerRankNow instanceof Date?new Date(root.__salesTrackerRankNow):new Date();
+const reportingDate=value=>root.SalesTrackerPacing?.reportingDateFromReference?.(value)||(()=>{const date=localDate(value);if(!date)return '';date.setDate(date.getDate()-2);return dateKey(date);})();
+const currentReportingDate=()=>reportingDate(dateKey(now()));
+const snapshotReportingDate=snapshot=>{
+ if(localDate(snapshot?.sourceReportingDate))return snapshot.sourceReportingDate;
+ if(localDate(snapshot?.sourceReferenceDate))return reportingDate(snapshot.sourceReferenceDate);
+ const updated=new Date(snapshot?.updated||'');
+ return Number.isNaN(updated.getTime())?'':reportingDate(dateKey(updated));
+};
+const validRank=value=>Number.isInteger(Number(value))&&Number(value)>=1&&Number(value)<=12;
+const complete=snapshot=>!!snapshot&&['mtdSales','dailySales','mtdGals','dailyGals'].every(key=>validRank(snapshot[key]));
+const fresh=snapshot=>complete(snapshot)&&snapshotReportingDate(snapshot)===currentReportingDate();
+const mode=()=>root.getSalesTrackerViewMode?.()||localStorage.getItem('sw_tracker_view_mode')||'mtd';
+const tier=rank=>rank===1?'gold':rank<=7?'silver':rank===12?'red':'bronze';
+function blankCard(cardId,rankId,dailyId,title){
+ const card=document.getElementById(cardId),rank=document.getElementById(rankId),daily=document.getElementById(dailyId),titleEl=card?.querySelector('.execTitle');
+ if(!card||!rank||!daily)return;
+ card.classList.remove('gold','silver','bronze','red','neutral','ytd-blank');card.classList.add('rank-stale');card.dataset.rankFresh='false';
+ if(titleEl)titleEl.textContent=title+' · '+mode().toUpperCase();
+ rank.textContent='—';daily.textContent='';daily.style.display='none';
+}
+function showCard(cardId,rankId,dailyId,title,mtd,dailyRank){
+ const card=document.getElementById(cardId),rank=document.getElementById(rankId),daily=document.getElementById(dailyId),titleEl=card?.querySelector('.execTitle');
+ if(!card||!rank||!daily)return;
+ card.classList.remove('gold','silver','bronze','red','neutral','ytd-blank','rank-stale');card.classList.add(tier(Number(mtd)));card.dataset.rankFresh='true';
+ if(titleEl)titleEl.textContent=title+' · MTD';
+ rank.textContent='#'+Number(mtd)+' / 12';daily.textContent='Daily Rank #'+Number(dailyRank);daily.style.display='';
+}
+function render(){
+ const snapshot=safeRead(),isFresh=fresh(snapshot),isYtd=mode()==='ytd';
+ if(isYtd||!isFresh){blankCard('salesExecCard','salesRankNum','dailySalesRankNum','Sales');blankCard('galsExecCard','galsRankNum','dailyGalsRankNum','Gallons');return false;}
+ showCard('salesExecCard','salesRankNum','dailySalesRankNum','Sales',snapshot.mtdSales,snapshot.dailySales);
+ showCard('galsExecCard','galsRankNum','dailyGalsRankNum','Gallons',snapshot.mtdGals,snapshot.dailyGals);
+ return true;
+}
+function schedule(){if(rolloverTimer)clearTimeout(rolloverTimer);const current=now(),next=new Date(current.getFullYear(),current.getMonth(),current.getDate()+1,0,0,1);rolloverTimer=setTimeout(()=>{render();schedule();},Math.max(1000,next-current));}
+function install(){
+ const app=root.appState;if(!app||app.__v3231RankFreshness)return false;
+ const update=app.updateExecutiveRankCards?.bind(app);
+ if(update)app.updateExecutiveRankCards=function(ranks){const result=update(ranks);queueMicrotask(render);return result;};
+ const clear=app.clearExecutiveRankCards?.bind(app);
+ if(clear)app.clearExecutiveRankCards=function(){const result=clear.apply(this,arguments);queueMicrotask(render);return result;};
+ app.__v3231RankFreshness=true;render();requestAnimationFrame(render);setTimeout(render,120);setTimeout(render,500);schedule();return true;
+}
+function runTests(){
+ const current=currentReportingDate(),today=dateKey(now()),yesterdayDate=now();yesterdayDate.setDate(yesterdayDate.getDate()-1);const yesterday=dateKey(yesterdayDate);
+ const base={mtdSales:2,dailySales:3,mtdGals:4,dailyGals:5};
+ const cases=[fresh({...base,sourceReportingDate:current,updated:new Date().toISOString()}),!fresh({...base,sourceReportingDate:reportingDate(yesterday),updated:new Date().toISOString()}),fresh({...base,updated:today+'T12:00:00'}),!fresh({...base,updated:yesterday+'T12:00:00'}),!fresh({...base,mtdSales:null,sourceReportingDate:current})];
+ return {version:VERSION,passed:cases.every(Boolean),total:cases.length,results:cases,currentReportingDate:current};
+}
+root.SalesTrackerRankFreshnessV3231={version:VERSION,render,fresh,snapshotReportingDate,currentReportingDate,runTests};
+root.SalesTrackerRankFreshnessV3231.testResults=runTests();
+if(document.readyState==='loading')root.addEventListener('DOMContentLoaded',()=>{const timer=setInterval(()=>{if(install())clearInterval(timer);},25);setTimeout(()=>{install();clearInterval(timer);},2000);});else install();
+root.addEventListener('pageshow',()=>{install();render();});
+root.addEventListener('focus',render);
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')render();});
+root.addEventListener('storage',event=>{if(event.key===KEY||event.key==='sw_tracker_view_mode')render();});
+['v30Mtd','v30Ytd'].forEach(id=>document.getElementById(id)?.addEventListener('click',()=>setTimeout(render,0)));
 })(window);
 </script>
 </body>
