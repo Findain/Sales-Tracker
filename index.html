@@ -5887,79 +5887,99 @@ if(document.readyState==='loading')root.addEventListener('DOMContentLoaded',inst
 new MutationObserver(install).observe(document.documentElement,{childList:true,subtree:true});
 })(window);
 </script>
-<style id="v3231-rank-freshness-style">
+<style id="v3232-authoritative-glass-rank-style">
 #execRankWrap .execCard.rank-stale{--rank-tier:#64748b!important;border-color:rgba(148,163,184,.35)!important;box-shadow:0 8px 22px rgba(0,0,0,.22)!important}
 #execRankWrap .execCard.rank-stale::before{background:#64748b!important;box-shadow:none!important}
-#execRankWrap .execCard.rank-stale .execRank{color:#94a3b8!important;text-shadow:none!important}
+#execRankWrap .execCard.rank-stale .execRank{color:transparent!important;text-shadow:none!important}
+#execRankWrap .execCard.rank-stale .execDaily{color:transparent!important;text-shadow:none!important}
 #execRankWrap .execCard.rank-stale .execDivider{background:rgba(148,163,184,.25)!important}
 </style>
-<script id="v3231-rank-freshness-controller">
+<script id="v3232-authoritative-glass-rank-controller">
 (function(root){
 'use strict';
-const VERSION='V3.2.31 Rank Freshness';
+const VERSION='V3.2.32 Authoritative Glass-Card Rank Freshness';
 const KEY='sw_tracker_live_ranks';
-let rolloverTimer=0;
+const GLASS_IDS=['salesRankNum','dailySalesRankNum','galsRankNum','dailyGalsRankNum'];
+let enforcing=false,observer=null,rolloverTimer=0;
 const safeRead=()=>{try{return JSON.parse(localStorage.getItem(KEY)||'null');}catch(error){return null;}};
 const localDate=value=>{const match=String(value||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);if(!match)return null;const date=new Date(Number(match[1]),Number(match[2])-1,Number(match[3]));return date.getFullYear()===Number(match[1])&&date.getMonth()===Number(match[2])-1&&date.getDate()===Number(match[3])?date:null;};
 const dateKey=date=>date.getFullYear()+'-'+String(date.getMonth()+1).padStart(2,'0')+'-'+String(date.getDate()).padStart(2,'0');
-const now=()=>root.__salesTrackerRankNow instanceof Date?new Date(root.__salesTrackerRankNow):new Date();
+const clock=()=>root.__salesTrackerRankNow instanceof Date?new Date(root.__salesTrackerRankNow):new Date();
 const reportingDate=value=>root.SalesTrackerPacing?.reportingDateFromReference?.(value)||(()=>{const date=localDate(value);if(!date)return '';date.setDate(date.getDate()-2);return dateKey(date);})();
-const currentReportingDate=()=>reportingDate(dateKey(now()));
-const snapshotReportingDate=snapshot=>{
- if(localDate(snapshot?.sourceReportingDate))return snapshot.sourceReportingDate;
- if(localDate(snapshot?.sourceReferenceDate))return reportingDate(snapshot.sourceReferenceDate);
- const updated=new Date(snapshot?.updated||'');
- return Number.isNaN(updated.getTime())?'':reportingDate(dateKey(updated));
-};
+const currentReportingDate=()=>reportingDate(dateKey(clock()));
+const snapshotReportingDate=snapshot=>localDate(snapshot?.sourceReportingDate)?snapshot.sourceReportingDate:localDate(snapshot?.sourceReferenceDate)?reportingDate(snapshot.sourceReferenceDate):'';
 const validRank=value=>Number.isInteger(Number(value))&&Number(value)>=1&&Number(value)<=12;
 const complete=snapshot=>!!snapshot&&['mtdSales','dailySales','mtdGals','dailyGals'].every(key=>validRank(snapshot[key]));
-const fresh=snapshot=>complete(snapshot)&&snapshotReportingDate(snapshot)===currentReportingDate();
+const isFresh=snapshot=>complete(snapshot)&&snapshotReportingDate(snapshot)===currentReportingDate();
 const mode=()=>root.getSalesTrackerViewMode?.()||localStorage.getItem('sw_tracker_view_mode')||'mtd';
 const tier=rank=>rank===1?'gold':rank<=7?'silver':rank===12?'red':'bronze';
-function blankCard(cardId,rankId,dailyId,title){
- const card=document.getElementById(cardId),rank=document.getElementById(rankId),daily=document.getElementById(dailyId),titleEl=card?.querySelector('.execTitle');
- if(!card||!rank||!daily)return;
- card.classList.remove('gold','silver','bronze','red','neutral','ytd-blank');card.classList.add('rank-stale');card.dataset.rankFresh='false';
- if(titleEl)titleEl.textContent=title+' · '+mode().toUpperCase();
- rank.textContent='—';daily.textContent='';daily.style.display='none';
+function nodes(cardId,rankId,dailyId){const card=document.getElementById(cardId);return {card,rank:document.getElementById(rankId),daily:document.getElementById(dailyId),title:card?.querySelector('.execTitle')};}
+function blankOne(cardId,rankId,dailyId,title){
+ const item=nodes(cardId,rankId,dailyId);if(!item.card||!item.rank||!item.daily)return;
+ if(!item.card.classList.contains('rank-stale')){item.card.classList.remove('gold','silver','bronze','red','neutral','ytd-blank');item.card.classList.add('rank-stale');}
+ if(item.card.dataset.rankFresh!=='false')item.card.dataset.rankFresh='false';
+ const expectedTitle=title+' · '+mode().toUpperCase();if(item.title&&item.title.textContent!==expectedTitle)item.title.textContent=expectedTitle;
+ if(item.rank.textContent!=='')item.rank.textContent='';
+ if(item.daily.textContent!=='')item.daily.textContent='';
+ if(item.daily.style.display!=='')item.daily.style.display='';
 }
-function showCard(cardId,rankId,dailyId,title,mtd,dailyRank){
- const card=document.getElementById(cardId),rank=document.getElementById(rankId),daily=document.getElementById(dailyId),titleEl=card?.querySelector('.execTitle');
- if(!card||!rank||!daily)return;
- card.classList.remove('gold','silver','bronze','red','neutral','ytd-blank','rank-stale');card.classList.add(tier(Number(mtd)));card.dataset.rankFresh='true';
- if(titleEl)titleEl.textContent=title+' · MTD';
- rank.textContent='#'+Number(mtd)+' / 12';daily.textContent='Daily Rank #'+Number(dailyRank);daily.style.display='';
+function showOne(cardId,rankId,dailyId,title,mtd,dailyRank){
+ const item=nodes(cardId,rankId,dailyId);if(!item.card||!item.rank||!item.daily)return;
+ const expectedTier=tier(Number(mtd));if(!item.card.classList.contains(expectedTier)||item.card.classList.contains('rank-stale')){item.card.classList.remove('gold','silver','bronze','red','neutral','ytd-blank','rank-stale');item.card.classList.add(expectedTier);}
+ if(item.card.dataset.rankFresh!=='true')item.card.dataset.rankFresh='true';
+ if(item.title&&item.title.textContent!==title+' · MTD')item.title.textContent=title+' · MTD';
+ const rankText='#'+Number(mtd)+' / 12',dailyText='Daily Rank #'+Number(dailyRank);if(item.rank.textContent!==rankText)item.rank.textContent=rankText;if(item.daily.textContent!==dailyText)item.daily.textContent=dailyText;if(item.daily.style.display!=='')item.daily.style.display='';
 }
-function render(){
- const snapshot=safeRead(),isFresh=fresh(snapshot),isYtd=mode()==='ytd';
- if(isYtd||!isFresh){blankCard('salesExecCard','salesRankNum','dailySalesRankNum','Sales');blankCard('galsExecCard','galsRankNum','dailyGalsRankNum','Gallons');return false;}
- showCard('salesExecCard','salesRankNum','dailySalesRankNum','Sales',snapshot.mtdSales,snapshot.dailySales);
- showCard('galsExecCard','galsRankNum','dailyGalsRankNum','Gallons',snapshot.mtdGals,snapshot.dailyGals);
- return true;
+function blankGlassCards(){blankOne('salesExecCard','salesRankNum','dailySalesRankNum','Sales');blankOne('galsExecCard','galsRankNum','dailyGalsRankNum','Gallons');}
+function enforce(){
+ if(enforcing)return false;enforcing=true;
+ try{
+  const snapshot=safeRead(),fresh=mode()==='mtd'&&isFresh(snapshot);
+  if(!fresh){
+   // Legacy snapshots have no source date and stale dated snapshots are invalidated.
+   // Removing them prevents every older glass-card renderer from restoring old values later.
+   if(snapshot){try{localStorage.removeItem(KEY);}catch(error){}}
+   blankGlassCards();return false;
+  }
+  showOne('salesExecCard','salesRankNum','dailySalesRankNum','Sales',snapshot.mtdSales,snapshot.dailySales);
+  showOne('galsExecCard','galsRankNum','dailyGalsRankNum','Gallons',snapshot.mtdGals,snapshot.dailyGals);
+  return true;
+ }finally{enforcing=false;}
 }
-function schedule(){if(rolloverTimer)clearTimeout(rolloverTimer);const current=now(),next=new Date(current.getFullYear(),current.getMonth(),current.getDate()+1,0,0,1);rolloverTimer=setTimeout(()=>{render();schedule();},Math.max(1000,next-current));}
+function glassMatchesExpected(){
+ const snapshot=safeRead(),fresh=mode()==='mtd'&&isFresh(snapshot);
+ const sales=nodes('salesExecCard','salesRankNum','dailySalesRankNum'),gals=nodes('galsExecCard','galsRankNum','dailyGalsRankNum');
+ if(!sales.card||!gals.card)return false;
+ if(!fresh)return sales.rank.textContent===''&&sales.daily.textContent===''&&gals.rank.textContent===''&&gals.daily.textContent===''&&sales.card.classList.contains('rank-stale')&&gals.card.classList.contains('rank-stale');
+ return sales.rank.textContent==='#'+Number(snapshot.mtdSales)+' / 12'&&sales.daily.textContent==='Daily Rank #'+Number(snapshot.dailySales)&&gals.rank.textContent==='#'+Number(snapshot.mtdGals)+' / 12'&&gals.daily.textContent==='Daily Rank #'+Number(snapshot.dailyGals)&&sales.card.dataset.rankFresh==='true'&&gals.card.dataset.rankFresh==='true';
+}
+function observeGlassCards(){
+ const wrap=document.getElementById('execRankWrap');if(!wrap||observer)return;
+ observer=new MutationObserver(()=>{if(!enforcing&&!glassMatchesExpected())queueMicrotask(enforce);});
+ observer.observe(wrap,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['class','style']});
+}
+function schedule(){if(rolloverTimer)clearTimeout(rolloverTimer);const current=clock(),next=new Date(current.getFullYear(),current.getMonth(),current.getDate()+1,0,0,1);rolloverTimer=setTimeout(()=>{enforce();schedule();},Math.max(1000,next-current));}
 function install(){
- const app=root.appState;if(!app||app.__v3231RankFreshness)return false;
+ const app=root.appState;if(!app||app.__v3232GlassRankFreshness)return false;
  const update=app.updateExecutiveRankCards?.bind(app);
- if(update)app.updateExecutiveRankCards=function(ranks){const result=update(ranks);queueMicrotask(render);return result;};
+ if(update)app.updateExecutiveRankCards=function(ranks){const result=update(ranks);enforce();return result;};
  const clear=app.clearExecutiveRankCards?.bind(app);
- if(clear)app.clearExecutiveRankCards=function(){const result=clear.apply(this,arguments);queueMicrotask(render);return result;};
- app.__v3231RankFreshness=true;render();requestAnimationFrame(render);setTimeout(render,120);setTimeout(render,500);schedule();return true;
+ if(clear)app.clearExecutiveRankCards=function(){const result=clear.apply(this,arguments);enforce();return result;};
+ const render=app.renderDashboard?.bind(app);
+ if(render)app.renderDashboard=function(){const result=render.apply(this,arguments);enforce();return result;};
+ app.__v3232GlassRankFreshness=true;observeGlassCards();enforce();requestAnimationFrame(enforce);setTimeout(enforce,100);setTimeout(enforce,450);setTimeout(enforce,1200);schedule();return true;
 }
-function runTests(){
- const current=currentReportingDate(),today=dateKey(now()),yesterdayDate=now();yesterdayDate.setDate(yesterdayDate.getDate()-1);const yesterday=dateKey(yesterdayDate);
- const base={mtdSales:2,dailySales:3,mtdGals:4,dailyGals:5};
- const cases=[fresh({...base,sourceReportingDate:current,updated:new Date().toISOString()}),!fresh({...base,sourceReportingDate:reportingDate(yesterday),updated:new Date().toISOString()}),fresh({...base,updated:today+'T12:00:00'}),!fresh({...base,updated:yesterday+'T12:00:00'}),!fresh({...base,mtdSales:null,sourceReportingDate:current})];
- return {version:VERSION,passed:cases.every(Boolean),total:cases.length,results:cases,currentReportingDate:current};
-}
-root.SalesTrackerRankFreshnessV3231={version:VERSION,render,fresh,snapshotReportingDate,currentReportingDate,runTests};
-root.SalesTrackerRankFreshnessV3231.testResults=runTests();
-if(document.readyState==='loading')root.addEventListener('DOMContentLoaded',()=>{const timer=setInterval(()=>{if(install())clearInterval(timer);},25);setTimeout(()=>{install();clearInterval(timer);},2000);});else install();
-root.addEventListener('pageshow',()=>{install();render();});
-root.addEventListener('focus',render);
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')render();});
-root.addEventListener('storage',event=>{if(event.key===KEY||event.key==='sw_tracker_view_mode')render();});
-['v30Mtd','v30Ytd'].forEach(id=>document.getElementById(id)?.addEventListener('click',()=>setTimeout(render,0)));
+function renderedBlank(){return GLASS_IDS.every(id=>(document.getElementById(id)?.textContent||'')==='');}
+function runTests(){const current=currentReportingDate(),base={mtdSales:2,dailySales:3,mtdGals:4,dailyGals:5};const cases=[isFresh({...base,sourceReportingDate:current}),!isFresh({...base,sourceReportingDate:'2000-01-01'}),!isFresh({...base,updated:new Date().toISOString()}),!isFresh({...base,mtdSales:null,sourceReportingDate:current})];return {version:VERSION,passed:cases.every(Boolean),total:cases.length,results:cases,currentReportingDate:current};}
+root.SalesTrackerGlassRankFreshnessV3232={version:VERSION,enforce,isFresh,snapshotReportingDate,currentReportingDate,renderedBlank,runTests};
+root.SalesTrackerGlassRankFreshnessV3232.testResults=runTests();
+function boot(){const timer=setInterval(()=>{if(install())clearInterval(timer);},25);setTimeout(()=>{install();observeGlassCards();enforce();clearInterval(timer);},2000);}
+if(document.readyState==='loading')root.addEventListener('DOMContentLoaded',boot);else boot();
+root.addEventListener('pageshow',()=>{install();observeGlassCards();enforce();});
+root.addEventListener('focus',enforce);
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')enforce();});
+root.addEventListener('storage',event=>{if(event.key===KEY||event.key==='sw_tracker_view_mode')enforce();});
+document.addEventListener('click',event=>{if(event.target?.closest?.('#v30Mtd,#v30Ytd'))queueMicrotask(enforce);},true);
 })(window);
 </script>
 </body>
