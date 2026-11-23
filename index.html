@@ -4,9 +4,10 @@
 Sales Tracker V3.2.28: MTD pace cards compare the latest reported MTD actuals through the effective reporting date (current local calendar date minus two days) with monthly targets prorated through that same date. Live planning cards continue to use the full monthly target and real calendar days remaining including today; uploaded-day comparisons retain the exact two-day reporting lag. Confirmed manual monthly actuals are persisted as per-metric overrides and remain authoritative over pre-existing daily records across render/reload; a later guarded daily reporting date may advance the month. Corp YTD, Actual YTD, blank YTD run-rate cards, validated two/four-slide OCR, overwrite protections, screenshot tools, onboarding, and splash behavior are retained. -->
 <html class="h-full" lang="en">
 <head>
+<!-- V3.2.37: atomic canonical commit for manual and OCR daily records. -->
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"/>
-<title>Sales Tracker V3.2.36 Canonical Split Persistence</title>
+<title>Sales Tracker V3.2.37 Atomic Daily Record Commit</title>
 <!-- Chart.js embedded for local/offline rendering -->
 <script>/*!
  * Chart.js v4.4.7
@@ -5838,100 +5839,7 @@ window.SalesTrackerEntryLog={rows,refreshCount};
 if(document.readyState==='loading')window.addEventListener('DOMContentLoaded',install);else install();
 })();
 </script>
-<script id="v3234-first-attempt-manual-save">
-(function(root){
-'use strict';
-const PATCH='V3.2.34 First-Attempt Manual Entry Transaction';
-const COMMIT_KEY='sw_tracker_daily_commit_v3210';
-const STORAGE_KEYS=[COMMIT_KEY,'sw_tracker_rep_id','sw_tracker_budgets','sw_tracker_actuals','sw_tracker_manual_actual_overrides','sw_tracker_corporate_ytd','sw_tracker_dailyRecords','sw_tracker_targetTier'];
-const FIELD_IDS=['recordDateInput','inputDailySls','inputDailyGals','inputMtdSls','inputMtdGals'];
-const METRICS=['sales','gals','mtdSales','mtdGals'];
-let running=false,commitCount=0;
-const safeParse=(value,fallback=null)=>{try{return value==null?fallback:JSON.parse(value);}catch(error){return fallback;}};
-const clone=value=>value==null?value:JSON.parse(JSON.stringify(value));
-const equal=(left,right)=>Math.abs(Number(left||0)-Number(right||0))<0.000001;
-const metricsEqual=(left,right)=>!!left&&!!right&&METRICS.every(key=>equal(left[key],right[key]));
-const localDate=value=>{const match=String(value||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);if(!match)return null;const date=new Date(Number(match[1]),Number(match[2])-1,Number(match[3]));return date.getFullYear()===Number(match[1])&&date.getMonth()===Number(match[2])-1&&date.getDate()===Number(match[3])?date:null;};
-const dateKey=date=>date.getFullYear()+'-'+String(date.getMonth()+1).padStart(2,'0')+'-'+String(date.getDate()).padStart(2,'0');
-const reportingDate=value=>root.SalesTrackerPacing?.reportingDateFromReference?.(value)||(()=>{const date=localDate(value);if(!date)return '';date.setDate(date.getDate()-2);return dateKey(date);})();
-const nice=value=>{const date=localDate(value);return date?date.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}):String(value||'');};
-const fieldValue=id=>String(document.getElementById(id)?.value??'').trim();
-const numberValue=id=>{const field=document.getElementById(id),value=field?.valueAsNumber;return Number.isFinite(value)?value:(fieldValue(id)!==''&&Number.isFinite(Number(fieldValue(id)))?Number(fieldValue(id)):0);};
-const snapshotForm=()=>{const sales=numberValue('inputDailySls'),gals=numberValue('inputDailyGals'),salesRaw=fieldValue('inputMtdSls'),galsRaw=fieldValue('inputMtdGals');return {selectedDate:fieldValue('recordDateInput'),metrics:{sales,gals,mtdSales:numberValue('inputMtdSls')||sales,mtdGals:numberValue('inputMtdGals')||gals},explicitMtd:{sales:salesRaw!==''&&Number(salesRaw)>0,gals:galsRaw!==''&&Number(galsRaw)>0}};};
-const verify=(app,key,expected)=>{const memory=app.dailyRecords?.[key],mirror=safeParse(localStorage.getItem('sw_tracker_dailyRecords'),{})?.[key],committed=safeParse(localStorage.getItem(COMMIT_KEY),{})?.dailyRecords?.[key];return metricsEqual(memory,expected)&&metricsEqual(mirror,expected)&&metricsEqual(committed,expected)&&String(memory?.entryMode||'')==='manual'&&String(mirror?.entryMode||'')==='manual'&&String(committed?.entryMode||'')==='manual';};
-const captureStorage=()=>Object.fromEntries(STORAGE_KEYS.map(key=>[key,localStorage.getItem(key)]));
-const restoreStorage=values=>Object.entries(values).forEach(([key,value])=>{if(value===null)localStorage.removeItem(key);else localStorage.setItem(key,value);});
-const latestForMonth=(records,date)=>Object.keys(records||{}).filter(key=>{const item=localDate(key);return item&&item.getFullYear()===date.getFullYear()&&item.getMonth()===date.getMonth();}).sort().pop()||'';
-function applyMonthly(app,key,next,records,explicit){
- const date=localDate(key);if(!date||latestForMonth(records,date)!==key)return false;
- const month=date.getMonth();let updated=false;
- const apply=(kind,candidate,complete)=>{
-  const override=app.getManualActualOverride?.(kind,month,date.getFullYear());
-  if(override&&(!override.supersedesThroughDate||key<=override.supersedesThroughDate))return;
-  const existing=Number(app.actuals?.[kind]?.[month])||0,value=Number(candidate);
-  if(!complete||!Number.isFinite(value)||value<=0||(existing>0&&value<existing))return;
-  app.actuals[kind][month]=value;updated=true;
-  if(override&&key>override.supersedesThroughDate&&app.manualActualOverrides?.[kind])app.manualActualOverrides[kind][month]=null;
- };
- apply('sales',next.mtdSales,explicit.sales);apply('gals',next.mtdGals,explicit.gals);return updated;
-}
-async function settleForm(){
- const active=document.activeElement;if(active&&FIELD_IDS.includes(active.id))active.blur();
- FIELD_IDS.forEach(id=>document.getElementById(id)?.dispatchEvent(new Event('change',{bubbles:true})));
- await Promise.resolve();
- await new Promise(resolve=>(root.requestAnimationFrame||root.setTimeout)(resolve,0));
- await new Promise(resolve=>root.setTimeout(resolve,0));
-}
-function modeIsManual(app){const flow=app?.__v3210DailyFlow;if(flow?.mode==='manual')return true;if(flow?.mode==='ocr')return false;return (document.getElementById('uploadModal')?.dataset.entryMode||'manual')!=='ocr';}
-function logContains(app,key){const rows=root.SalesTrackerEntryLog?.rows?.(app,[]);return !Array.isArray(rows)||rows.some(item=>item?.date===key&&metricsEqual(item.record,app.dailyRecords?.[key]));}
-async function commitManual(app){
- await settleForm();
- const draft=snapshotForm(),key=reportingDate(draft.selectedDate),next=draft.metrics;
- if(!key)throw new Error('Please specify a valid screenshot reference date.');
- const previous=app.dailyRecords?.[key]||null;
- const other=Object.entries(app.dailyRecords||{}).find(([date,record])=>date!==key&&metricsEqual(record,next));
- if(other&&!root.confirm(`Duplicate values detected.\n\nAll four values match the entry for ${nice(other[0])}.\nYou are attempting to save them for ${nice(key)}.\n\nChoose OK only if the values are intentionally unchanged.`))return {cancelled:true,key,next};
- const date=localDate(key),prior=Object.entries(app.dailyRecords||{}).filter(([saved])=>{const item=localDate(saved);return saved<key&&item&&date&&item.getFullYear()===date.getFullYear()&&item.getMonth()===date.getMonth();}).sort((left,right)=>right[0].localeCompare(left[0]))[0];
- if(prior&&(next.mtdSales<Number(prior[1].mtdSales||0)||next.mtdGals<Number(prior[1].mtdGals||0))){const issues=[];if(next.mtdSales<Number(prior[1].mtdSales||0))issues.push(`MTD Sales: ${next.mtdSales.toLocaleString()} is below ${Number(prior[1].mtdSales||0).toLocaleString()}`);if(next.mtdGals<Number(prior[1].mtdGals||0))issues.push(`MTD Gallons: ${next.mtdGals.toLocaleString()} is below ${Number(prior[1].mtdGals||0).toLocaleString()}`);if(!root.confirm(`Cumulative value regression detected.\n\nCompared with ${nice(prior[0])}:\n${issues.join('\n')}\n\nChoose OK only to override this protection.`))return {cancelled:true,key,next};}
- const record={...next,screenshotId:null,entryMode:'manual',savedAt:new Date().toISOString(),version:'V3.2.34'};
- const beforeState={dailyRecords:clone(app.dailyRecords),actuals:clone(app.actuals),manualActualOverrides:clone(app.manualActualOverrides),activeMonth:app.activeMonth};
- const beforeStorage=captureStorage();
- try{
-  app.dailyRecords={...(app.dailyRecords||{}),[key]:record};
-  const monthlyUpdated=applyMonthly(app,key,next,app.dailyRecords,draft.explicitMtd);
-  if(date){app.activeMonth=date.getMonth();const month=document.getElementById('activeMonthSelect');if(month)month.value=String(app.activeMonth);}
-  if(app.saveState()!==true)throw new Error('Browser storage did not confirm the daily entry.');
-  if(!verify(app,key,record))throw new Error('The saved entry did not match the finalized form values.');
-  app.loadSavedStateData();
-  if(!verify(app,key,record))throw new Error('Reload verification did not reproduce the daily entry.');
-  app.renderDashboard();root.SalesTrackerEntryLog?.refreshCount?.();
-  if(!logContains(app,key))throw new Error('The saved entry did not appear in the entry log.');
-  app.closeUploadModal();commitCount++;
-  app.showToast(previous?(monthlyUpdated?`Existing entry for ${nice(key)} updated and verified. Monthly actuals were recalculated.`:`Existing entry for ${nice(key)} updated and verified.`):(monthlyUpdated?`Saved ${nice(draft.selectedDate)} to reporting date ${nice(key)}. Monthly actuals updated.`:`Saved ${nice(draft.selectedDate)} to reporting date ${nice(key)}.`),'success');
-  return {saved:true,key,record,monthlyUpdated};
- }catch(error){
-  app.dailyRecords=beforeState.dailyRecords;app.actuals=beforeState.actuals;app.manualActualOverrides=beforeState.manualActualOverrides;app.activeMonth=beforeState.activeMonth;
-  try{restoreStorage(beforeStorage);}catch(restoreError){console.error(PATCH+' rollback failed',restoreError);}
-  throw error;
- }
-}
-async function handle(event){
- event.preventDefault();event.stopImmediatePropagation();
- if(running)return;
- const app=root.appState;
- if(!app||typeof app.saveState!=='function'){app?.showToast?.('The tracker is still starting. Please wait a moment and press Save again.','error');return;}
- if(!modeIsManual(app)){Promise.resolve(app.saveDailyRecord()).catch(error=>{console.error(PATCH,error);app.showToast?.(error?.message||'The OCR entry could not be saved.','error');});return;}
- running=true;const button=event.currentTarget||document.getElementById('saveDailyRecordBtn');
- try{if(button){button.disabled=true;button.setAttribute('aria-busy','true');button.textContent='Saving & Verifying…';}await commitManual(app);}
- catch(error){console.error(PATCH,error);app.showToast?.(error?.message||'The daily entry could not be saved. The form remains open.','error');}
- finally{running=false;if(button){button.disabled=false;button.setAttribute('aria-busy','false');button.textContent='Save Daily Record';}}
-}
-function install(){const button=document.getElementById('saveDailyRecordBtn')||document.querySelector('#uploadModal button[onclick*="saveDailyRecord"]');if(!button||button.dataset.v3234ManualSave==='true')return false;button.id='saveDailyRecordBtn';button.type='button';button.removeAttribute('onclick');button.dataset.v3230ManualSave='true';button.dataset.v3234ManualSave='true';button.addEventListener('click',handle,true);return true;}
-root.SalesTrackerManualSaveV3234={version:PATCH,install,commitManual,snapshotForm,reportingDate,verify,get commitCount(){return commitCount;}};
-if(document.readyState==='loading')root.addEventListener('DOMContentLoaded',install);else install();
-new MutationObserver(install).observe(document.documentElement,{childList:true,subtree:true});
-})(window);
-</script>
+
 <style id="v3232-authoritative-glass-rank-style">
 #execRankWrap .execCard.rank-stale{--rank-tier:#64748b!important;border-color:rgba(148,163,184,.35)!important;box-shadow:0 8px 22px rgba(0,0,0,.22)!important}
 #execRankWrap .execCard.rank-stale::before{background:#64748b!important;box-shadow:none!important}
@@ -6028,96 +5936,107 @@ document.addEventListener('click',event=>{if(event.target?.closest?.('#v30Mtd,#v
 })(window);
 </script>
 <!-- V3.2.35: authoritative delegated manual-entry save controller. -->
-<script id="v3235-authoritative-first-save">
+
+
+
+<script id="v3237-atomic-daily-record-commit">
 (function(root){
 'use strict';
-const PATCH='V3.2.36 Canonical Split-Persistence Repair';
+const PATCH='V3.2.37 Atomic Daily Record Commit';
 const STATE_KEY='sw_tracker_daily_commit_v3210';
 const HISTORY_KEY='sw_tracker_dailyRecords';
-const MIRRORS=['sw_tracker_rep_id','sw_tracker_budgets','sw_tracker_actuals','sw_tracker_manual_actual_overrides','sw_tracker_corporate_ytd',HISTORY_KEY,'sw_tracker_targetTier','sw_tracker_activeMonth'];
+const TX_KEY='sw_tracker_daily_tx_v3237';
+const RECEIPT_KEY='sw_tracker_daily_receipt_v3237';
+const MIRROR_KEYS=['sw_tracker_rep_id','sw_tracker_budgets','sw_tracker_actuals','sw_tracker_manual_actual_overrides','sw_tracker_corporate_ytd',HISTORY_KEY,'sw_tracker_targetTier','sw_tracker_activeMonth'];
 const FIELDS=['recordDateInput','inputDailySls','inputDailyGals','inputMtdSls','inputMtdGals'];
 const METRICS=['sales','gals','mtdSales','mtdGals'];
-let running=false,pointerDraft=null,revision=0;
+let running=false,pointerDraft=null,revision=0,reconciling=false;
 const parse=(value,fallback=null)=>{try{return value==null?fallback:JSON.parse(value);}catch(error){return fallback;}};
 const clone=value=>value==null?value:JSON.parse(JSON.stringify(value));
 const equal=(left,right)=>Math.abs(Number(left||0)-Number(right||0))<0.000001;
 const metricsEqual=(left,right)=>!!left&&!!right&&METRICS.every(key=>equal(left[key],right[key]));
 const raw=id=>String(document.getElementById(id)?.value??'').trim();
-const number=txt=>txt!==''&&Number.isFinite(Number(txt))?Number(txt):0;
+const numeric=value=>value!==''&&Number.isFinite(Number(value))?Number(value):0;
 const rawDraft=()=>({capturedAt:Date.now(),values:Object.fromEntries(FIELDS.map(id=>[id,raw(id)]))});
 const mergeDraft=(early,late)=>({values:Object.fromEntries(FIELDS.map(id=>[id,(late?.values?.[id]??'')!==''?late.values[id]:(early?.values?.[id]??'')]))});
-const finalize=draft=>{const v=draft.values,sales=number(v.inputDailySls),gals=number(v.inputDailyGals);return {selectedDate:v.recordDateInput,metrics:{sales,gals,mtdSales:number(v.inputMtdSls)||sales,mtdGals:number(v.inputMtdGals)||gals},explicitMtd:{sales:v.inputMtdSls!==''&&number(v.inputMtdSls)>0,gals:v.inputMtdGals!==''&&number(v.inputMtdGals)>0}};};
+const finalize=draft=>{const value=draft.values,sales=numeric(value.inputDailySls),gals=numeric(value.inputDailyGals);return {selectedDate:value.recordDateInput,metrics:{sales,gals,mtdSales:numeric(value.inputMtdSls)||sales,mtdGals:numeric(value.inputMtdGals)||gals},explicitMtd:{sales:value.inputMtdSls!==''&&numeric(value.inputMtdSls)>0,gals:value.inputMtdGals!==''&&numeric(value.inputMtdGals)>0}};};
 const localDate=value=>{const match=String(value||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);if(!match)return null;const date=new Date(Number(match[1]),Number(match[2])-1,Number(match[3]));return date.getFullYear()===Number(match[1])&&date.getMonth()===Number(match[2])-1&&date.getDate()===Number(match[3])?date:null;};
 const dateKey=date=>date.getFullYear()+'-'+String(date.getMonth()+1).padStart(2,'0')+'-'+String(date.getDate()).padStart(2,'0');
 const reportingDate=value=>root.SalesTrackerPacing?.reportingDateFromReference?.(value)||(()=>{const date=localDate(value);if(!date)return '';date.setDate(date.getDate()-2);return dateKey(date);})();
 const nice=value=>{const date=localDate(value);return date?date.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}):String(value||'');};
-const button=()=>document.getElementById('saveDailyRecordBtn');
-const busy=state=>{const node=button();if(!node)return;node.disabled=state;node.setAttribute('aria-busy',state?'true':'false');node.textContent=state?'Saving & Verifying…':'Save Daily Record';};
-const manualMode=app=>{const flow=app?.__v3210DailyFlow;if(flow?.mode==='manual')return true;if(flow?.mode==='ocr')return false;return (document.getElementById('uploadModal')?.dataset.entryMode||'manual')!=='ocr';};
-const captureStorage=()=>Object.fromEntries([STATE_KEY,...MIRRORS].map(key=>[key,localStorage.getItem(key)]));
-const restoreStorage=state=>Object.entries(state).forEach(([key,value])=>value===null?localStorage.removeItem(key):localStorage.setItem(key,value));
-const savedTime=record=>{const time=Date.parse(record?.savedAt||record?.createdAt||'');return Number.isFinite(time)?time:0;};
+const savedTime=record=>{const time=Date.parse(record?.savedAt||record?.createdAt||record?.updated||'');return Number.isFinite(time)?time:0;};
+const recordHash=record=>METRICS.map(key=>Number(record?.[key]||0)).join('|')+'|'+String(record?.entryMode||'')+'|'+String(record?.screenshotId||'');
 function normalizeRecord(key,value){
- const record=value&&typeof value==='object'?clone(value):{};
- const sales=Number(record.sales),gals=Number(record.gals),mtdSales=Number(record.mtdSales),mtdGals=Number(record.mtdGals);
- return {...record,reportingDate:key,sales:Number.isFinite(sales)?sales:0,gals:Number.isFinite(gals)?gals:0,mtdSales:Number.isFinite(mtdSales)?mtdSales:(Number.isFinite(sales)?sales:0),mtdGals:Number.isFinite(mtdGals)?mtdGals:(Number.isFinite(gals)?gals:0),entryMode:record.entryMode||((record.screenshotId||record.imageId)?'ocr':'manual'),screenshotId:record.screenshotId??null,savedAt:String(record.savedAt||record.createdAt||'')};
+ const source=value&&typeof value==='object'?clone(value):{};
+ const sales=Number(source.sales),gals=Number(source.gals),mtdSales=Number(source.mtdSales),mtdGals=Number(source.mtdGals);
+ return {...source,reportingDate:key,sales:Number.isFinite(sales)?sales:0,gals:Number.isFinite(gals)?gals:0,mtdSales:Number.isFinite(mtdSales)?mtdSales:(Number.isFinite(sales)?sales:0),mtdGals:Number.isFinite(mtdGals)?mtdGals:(Number.isFinite(gals)?gals:0),entryMode:source.entryMode||((source.screenshotId||source.imageId)?'ocr':'manual'),screenshotId:source.screenshotId??null,savedAt:String(source.savedAt||source.createdAt||source.updated||'')};
 }
 function canonicalRecords(app){
- const committed=parse(localStorage.getItem(STATE_KEY),{})?.dailyRecords||{};
- const history=parse(localStorage.getItem(HISTORY_KEY),{})||{};
- const memory=app?.dailyRecords||{};
- const sources=[{records:memory,priority:1},{records:history,priority:2},{records:committed,priority:3}],winners=new Map();
+ const state=parse(localStorage.getItem(STATE_KEY),{})||{};
+ const sources=[{records:app?.dailyRecords||{},priority:1},{records:parse(localStorage.getItem(HISTORY_KEY),{})||{},priority:2},{records:state.dailyRecords||{},priority:3}],winners=new Map();
  for(const source of sources)for(const [key,value] of Object.entries(source.records||{})){
   if(!localDate(key))continue;
-  const record=normalizeRecord(key,value),candidate={record,time:savedTime(record),priority:source.priority},previous=winners.get(key);
-  if(!previous||candidate.time>previous.time||(candidate.time===previous.time&&candidate.priority>previous.priority))winners.set(key,candidate);
+  const record=normalizeRecord(key,value),candidate={record,time:savedTime(record),priority:source.priority},prior=winners.get(key);
+  if(!prior||candidate.time>prior.time||(candidate.time===prior.time&&candidate.priority>prior.priority))winners.set(key,candidate);
  }
- return Object.fromEntries([...winners.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([key,value])=>[key,value.record]));
+ return Object.fromEntries([...winners.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([key,item])=>[key,item.record]));
 }
-function stateSnapshot(app,records){
- const existing=parse(localStorage.getItem(STATE_KEY),{})||{};
- const activeMonth=Math.max(0,Math.min(11,Number.isInteger(Number(app.activeMonth))?Number(app.activeMonth):(Number(existing.activeMonth)||0)));
- return {...existing,version:'V3.2.36',revision:Date.now()*1000+(revision++%1000),committedAt:new Date().toISOString(),repId:String(app.selectedRep?.id||localStorage.getItem('sw_tracker_rep_id')||existing.repId||''),budgets:clone(app.budgets),actuals:clone(app.actuals),manualActualOverrides:clone(app.manualActualOverrides),corporateYtd:clone(app.corporateYtd),dailyRecords:clone(records),targetTierMultiplier:Number(app.targetTierMultiplier)||1.02,activeMonth};
+const captureStorage=()=>Object.fromEntries([STATE_KEY,TX_KEY,RECEIPT_KEY,...MIRROR_KEYS].map(key=>[key,localStorage.getItem(key)]));
+const restoreStorage=values=>Object.entries(values).forEach(([key,value])=>value===null?localStorage.removeItem(key):localStorage.setItem(key,value));
+function buildState(app,records,txId){
+ const previous=parse(localStorage.getItem(STATE_KEY),{})||{};
+ return {...previous,version:'V3.2.28',buildVersion:'V3.2.37',schemaVersion:2,transactionId:txId,revision:Date.now()*1000+(revision++%1000),committedAt:new Date().toISOString(),repId:String(app.selectedRep?.id||localStorage.getItem('sw_tracker_rep_id')||previous.repId||''),budgets:clone(app.budgets),actuals:clone(app.actuals),manualActualOverrides:clone(app.manualActualOverrides),corporateYtd:clone(app.corporateYtd),dailyRecords:clone(records),targetTierMultiplier:Number(app.targetTierMultiplier)||1.02,activeMonth:Math.max(0,Math.min(11,Number(app.activeMonth)||0))};
 }
-function writeCanonical(app,records){
- const normalized=Object.fromEntries(Object.entries(records||{}).filter(([key])=>localDate(key)).map(([key,value])=>[key,normalizeRecord(key,value)]));
- const before=captureStorage(),beforeMemory=clone(app.dailyRecords||{}),state=stateSnapshot(app,normalized);
+function writeMirrors(state){
+ localStorage.setItem('sw_tracker_rep_id',state.repId);
+ localStorage.setItem('sw_tracker_budgets',JSON.stringify(state.budgets));
+ localStorage.setItem('sw_tracker_actuals',JSON.stringify(state.actuals));
+ localStorage.setItem('sw_tracker_manual_actual_overrides',JSON.stringify(state.manualActualOverrides));
+ localStorage.setItem('sw_tracker_corporate_ytd',JSON.stringify(state.corporateYtd));
+ localStorage.setItem(HISTORY_KEY,JSON.stringify(state.dailyRecords));
+ localStorage.setItem('sw_tracker_targetTier',String(state.targetTierMultiplier));
+ localStorage.setItem('sw_tracker_activeMonth',String(state.activeMonth));
+}
+function commitCanonical(app,records,key,expected){
+ const before=captureStorage(),beforeMemory=clone(app.dailyRecords||{}),txId='daily-'+Date.now()+'-'+Math.random().toString(36).slice(2),state=buildState(app,records,txId);
  if(!state.repId)throw new Error('Select a territory before saving a daily entry.');
  try{
-  app.dailyRecords=clone(normalized);
-  localStorage.setItem(HISTORY_KEY,JSON.stringify(normalized));
+  localStorage.setItem(TX_KEY,JSON.stringify({id:txId,status:'preparing',reportingDate:key,startedAt:new Date().toISOString()}));
+  app.dailyRecords=clone(records);
+  // This single snapshot is authoritative. Mirrors are compatibility copies repaired from it.
   localStorage.setItem(STATE_KEY,JSON.stringify(state));
-  localStorage.setItem('sw_tracker_rep_id',state.repId);
-  localStorage.setItem('sw_tracker_budgets',JSON.stringify(state.budgets));
-  localStorage.setItem('sw_tracker_actuals',JSON.stringify(state.actuals));
-  localStorage.setItem('sw_tracker_manual_actual_overrides',JSON.stringify(state.manualActualOverrides));
-  localStorage.setItem('sw_tracker_corporate_ytd',JSON.stringify(state.corporateYtd));
-  localStorage.setItem('sw_tracker_targetTier',String(state.targetTierMultiplier));
-  localStorage.setItem('sw_tracker_activeMonth',String(state.activeMonth));
-  return state;
+  writeMirrors(state);
+  const receipt={id:txId,status:'committed',reportingDate:key,recordHash:recordHash(expected),committedAt:state.committedAt,revision:state.revision};
+  localStorage.setItem(RECEIPT_KEY,JSON.stringify(receipt));
+  localStorage.removeItem(TX_KEY);
+  return {state,receipt};
  }catch(error){app.dailyRecords=beforeMemory;restoreStorage(before);throw error;}
 }
-function sameRecordMap(left,right){
+function sameMap(left,right){
  const a=Object.keys(left||{}).sort(),b=Object.keys(right||{}).sort();
- return a.length===b.length&&a.every((key,index)=>key===b[index]&&metricsEqual(left[key],right[key])&&String(left[key]?.entryMode||'')===String(right[key]?.entryMode||''));
+ return a.length===b.length&&a.every((key,index)=>key===b[index]&&recordHash(normalizeRecord(key,left[key]))===recordHash(normalizeRecord(key,right[key])));
 }
-function repairSplit(app){
- if(!app)return {};
- const state=parse(localStorage.getItem(STATE_KEY),{})||{},savedMonth=Number(localStorage.getItem('sw_tracker_activeMonth')??state.activeMonth);
- if(Number.isInteger(savedMonth)&&savedMonth>=0&&savedMonth<=11){app.activeMonth=savedMonth;const select=document.getElementById('activeMonthSelect');if(select)select.value=String(savedMonth);}
- const records=canonicalRecords(app),history=parse(localStorage.getItem(HISTORY_KEY),{})||{},committed=state.dailyRecords||{};
- app.dailyRecords=clone(records);
- if(Object.keys(records).length&&(app.selectedRep?.id||localStorage.getItem('sw_tracker_rep_id'))&&(!sameRecordMap(history,records)||!sameRecordMap(committed,records)))writeCanonical(app,records);
- return records;
+function reconcile(app){
+ if(!app||reconciling)return app?.dailyRecords||{};
+ reconciling=true;
+ try{
+  const state=parse(localStorage.getItem(STATE_KEY),{})||{},records=canonicalRecords(app),repId=String(app.selectedRep?.id||localStorage.getItem('sw_tracker_rep_id')||state.repId||'');
+  const savedMonth=Number(localStorage.getItem('sw_tracker_activeMonth')??state.activeMonth);
+  if(Number.isInteger(savedMonth)&&savedMonth>=0&&savedMonth<=11){app.activeMonth=savedMonth;const select=document.getElementById('activeMonthSelect');if(select)select.value=String(savedMonth);}
+  app.dailyRecords=clone(records);
+  const needsRepair=repId&&Object.keys(records).length&&(!sameMap(state.dailyRecords||{},records)||!sameMap(parse(localStorage.getItem(HISTORY_KEY),{})||{},records)||state.version!=='V3.2.28'||state.buildVersion!=='V3.2.37'||localStorage.getItem(TX_KEY));
+  if(needsRepair){const repaired=buildState(app,records,'reconcile-'+Date.now());localStorage.setItem(STATE_KEY,JSON.stringify(repaired));writeMirrors(repaired);localStorage.removeItem(TX_KEY);}
+  return records;
+ }finally{reconciling=false;}
 }
 function verifyCopies(app,key,expected){
- const memory=app.dailyRecords?.[key],history=parse(localStorage.getItem(HISTORY_KEY),{})?.[key],committed=parse(localStorage.getItem(STATE_KEY),{})?.dailyRecords?.[key];
- return [memory,history,committed].every(record=>metricsEqual(record,expected)&&record?.reportingDate===key&&record?.entryMode==='manual');
+ const memory=app.dailyRecords?.[key],history=parse(localStorage.getItem(HISTORY_KEY),{})?.[key],state=parse(localStorage.getItem(STATE_KEY),{}),committed=state?.dailyRecords?.[key],receipt=parse(localStorage.getItem(RECEIPT_KEY),{});
+ return [memory,history,committed].every(record=>metricsEqual(record,expected)&&record?.reportingDate===key&&String(record?.entryMode||'')===String(expected.entryMode||'')&&String(record?.screenshotId||'')===String(expected.screenshotId||''))&&state.version==='V3.2.28'&&state.buildVersion==='V3.2.37'&&receipt.reportingDate===key&&receipt.recordHash===recordHash(expected)&&!localStorage.getItem(TX_KEY);
 }
 function applyMonthly(app,key,next,explicit){
  const date=localDate(key);if(!date)return false;
  const monthKeys=Object.keys(app.dailyRecords||{}).filter(saved=>{const item=localDate(saved);return item&&item.getFullYear()===date.getFullYear()&&item.getMonth()===date.getMonth();}).sort();
- if(monthKeys.at(-1)!==key)return false;
+ if(monthKeys[monthKeys.length-1]!==key)return false;
  const month=date.getMonth();let updated=false;
  for(const [kind,candidate,complete] of [['sales',next.mtdSales,explicit.sales],['gals',next.mtdGals,explicit.gals]]){
   const override=app.getManualActualOverride?.(kind,month,date.getFullYear());
@@ -6129,68 +6048,78 @@ function applyMonthly(app,key,next,explicit){
  }
  return updated;
 }
-async function settle(){const active=document.activeElement;if(active&&FIELDS.includes(active.id))active.blur();FIELDS.forEach(id=>document.getElementById(id)?.dispatchEvent(new Event('change',{bubbles:true})));await Promise.resolve();await new Promise(resolve=>(root.requestAnimationFrame||root.setTimeout)(resolve,0));}
+async function settle(){
+ const active=document.activeElement;if(active&&FIELDS.includes(active.id))active.blur();
+ FIELDS.forEach(id=>{const field=document.getElementById(id);field?.dispatchEvent(new Event('input',{bubbles:true}));field?.dispatchEvent(new Event('change',{bubbles:true}));});
+ await Promise.resolve();await new Promise(resolve=>(root.requestAnimationFrame||root.setTimeout)(resolve,0));await new Promise(resolve=>root.setTimeout(resolve,0));
+}
 function inLog(app,key,expected){const rows=root.SalesTrackerEntryLog?.rows?.(app,[]);return Array.isArray(rows)&&rows.some(item=>item?.date===key&&metricsEqual(item.record,expected));}
 function previousSourceReads(app,key,expected){
  const date=localDate(key),engine=root.SalesTrackerPacing;if(!date||!engine?.buildScope)return false;
  const now=new Date(date.getFullYear(),date.getMonth(),date.getDate()+2,12),scope=engine.buildScope({mode:'mtd',activeMonth:date.getMonth(),year:date.getFullYear(),budgets:app.budgets,actuals:app.actuals,manualActualOverrides:app.manualActualOverrides,dailyRecords:canonicalRecords(app),corporateYtd:app.corporateYtd,targetTierMultiplier:app.targetTierMultiplier,now});
  return scope?.comparisonEntry?.key===key&&metricsEqual(scope.comparisonEntry.record,expected);
 }
-async function commitManual(app,earlyDraft){
+function setBusy(state){const node=document.getElementById('saveDailyRecordBtn')||document.querySelector('#uploadModal button[onclick*="saveDailyRecord"]');if(!node)return;if(!node.id)node.id='saveDailyRecordBtn';node.disabled=state;node.setAttribute('aria-busy',state?'true':'false');node.textContent=state?'Saving & Verifying…':'Save Daily Record';}
+async function archiveScreenshot(app,key,next,previous,image){
+ if(!image?.image)throw new Error('The uploaded sales sheet is not ready. Wait for OCR to finish and try Save once.');
+ const id='shot_'+key,old=await root.ScreenshotArchive.get(previous?.screenshotId||id),shot={id,recordDate:key,image:image.image,hash:image.hash||'',fileName:image.name||'',fileLastModified:image.lastModified||0,metrics:{...next},repName:app.selectedRep?.name||'',territory:app.selectedRep?.territory||'',created:old?.created||old?.createdAt||new Date().toISOString(),updated:new Date().toISOString(),version:'V3.2.37'};
+ await root.ScreenshotArchive.put(shot);const saved=await root.ScreenshotArchive.get(id);if(!saved||saved.recordDate!==key||!saved.image)throw new Error('The uploaded sales sheet archive could not be verified.');
+ return {id,old,shot};
+}
+async function commitDaily(app,earlyDraft){
+ const flow=app.__v3210DailyFlow||{};if(flow.ocrPromise)await flow.ocrPromise;
  await settle();
  const draft=finalize(mergeDraft(earlyDraft,rawDraft())),key=reportingDate(draft.selectedDate),next=draft.metrics;
  if(!key)throw new Error('Please specify a valid screenshot reference date.');
- const all=canonicalRecords(app),previous=all[key]||null;
+ const mode=flow.mode==='ocr'?'ocr':'manual',all=canonicalRecords(app),previous=all[key]||null;
  const duplicate=Object.entries(all).find(([date,record])=>date!==key&&metricsEqual(record,next));
  if(duplicate&&!root.confirm(`Duplicate values detected.\n\nAll four values match the entry for ${nice(duplicate[0])}.\nYou are attempting to save them for ${nice(key)}.\n\nChoose OK only if the values are intentionally unchanged.`))return {cancelled:true};
  const date=localDate(key),prior=Object.entries(all).filter(([saved])=>{const item=localDate(saved);return saved<key&&item&&date&&item.getFullYear()===date.getFullYear()&&item.getMonth()===date.getMonth();}).sort((a,b)=>b[0].localeCompare(a[0]))[0];
- if(prior&&(next.mtdSales<Number(prior[1].mtdSales||0)||next.mtdGals<Number(prior[1].mtdGals||0))){
-  const issues=[];if(next.mtdSales<Number(prior[1].mtdSales||0))issues.push(`MTD Sales: ${next.mtdSales.toLocaleString()} is below ${Number(prior[1].mtdSales||0).toLocaleString()}`);if(next.mtdGals<Number(prior[1].mtdGals||0))issues.push(`MTD Gallons: ${next.mtdGals.toLocaleString()} is below ${Number(prior[1].mtdGals||0).toLocaleString()}`);
-  if(!root.confirm(`Cumulative value regression detected.\n\nCompared with ${nice(prior[0])}:\n${issues.join('\n')}\n\nChoose OK only to override this protection.`))return {cancelled:true};
- }
- const beforeApp={dailyRecords:clone(app.dailyRecords),actuals:clone(app.actuals),manualActualOverrides:clone(app.manualActualOverrides),activeMonth:app.activeMonth},beforeStorage=captureStorage();
+ if(prior&&(next.mtdSales<Number(prior[1].mtdSales||0)||next.mtdGals<Number(prior[1].mtdGals||0))){const issues=[];if(next.mtdSales<Number(prior[1].mtdSales||0))issues.push(`MTD Sales: ${next.mtdSales.toLocaleString()} is below ${Number(prior[1].mtdSales||0).toLocaleString()}`);if(next.mtdGals<Number(prior[1].mtdGals||0))issues.push(`MTD Gallons: ${next.mtdGals.toLocaleString()} is below ${Number(prior[1].mtdGals||0).toLocaleString()}`);if(!root.confirm(`Cumulative value regression detected.\n\nCompared with ${nice(prior[0])}:\n${issues.join('\n')}\n\nChoose OK only to override this protection.`))return {cancelled:true};}
+ const beforeApp={dailyRecords:clone(app.dailyRecords),actuals:clone(app.actuals),manualActualOverrides:clone(app.manualActualOverrides),activeMonth:app.activeMonth},beforeStorage=captureStorage();let archive=null;
  try{
-  const record=normalizeRecord(key,{...next,screenshotId:null,entryMode:'manual',savedAt:new Date().toISOString(),version:'V3.2.36'});
+  if(mode==='ocr')archive=await archiveScreenshot(app,key,next,previous,flow.image);
+  const record=normalizeRecord(key,{...next,referenceDate:draft.selectedDate,screenshotId:archive?.id||null,entryMode:mode,savedAt:new Date().toISOString(),version:'V3.2.37'});
   all[key]=record;app.dailyRecords=clone(all);
   const monthlyUpdated=applyMonthly(app,key,next,draft.explicitMtd);
   if(date){app.activeMonth=date.getMonth();const select=document.getElementById('activeMonthSelect');if(select)select.value=String(app.activeMonth);}
-  writeCanonical(app,all);
-  if(!verifyCopies(app,key,record))throw new Error('The canonical scoreboard and daily-history copies did not match.');
-  app.loadSavedStateData?.();repairSplit(app);
-  if(!verifyCopies(app,key,record))throw new Error('Reload hydration did not reproduce both canonical copies.');
+  commitCanonical(app,all,key,record);
+  if(!verifyCopies(app,key,record))throw new Error('The atomic daily-record commit did not verify all canonical copies.');
+  app.loadSavedStateData?.();reconcile(app);
+  if(!verifyCopies(app,key,record))throw new Error('Reload hydration did not reproduce the canonical daily record.');
   app.renderDashboard?.();root.SalesTrackerEntryLog?.refreshCount?.();
-  if(!inLog(app,key,record))throw new Error('The saved manual entry did not appear in the Entry Log source.');
-  if(!previousSourceReads(app,key,record))throw new Error('The Previous Day comparison source did not read the saved reporting-date record.');
+  if(!inLog(app,key,record))throw new Error('The committed record did not appear in the Monthly Entry Timeline source.');
+  if(!previousSourceReads(app,key,record))throw new Error('The Previous Day comparison source did not bind to the committed reporting-date record.');
+  flow.image=null;flow.imagePromise=null;flow.status='idle';flow.cancelled=false;
   app.closeUploadModal?.();
-  app.showToast?.(previous?`Existing entry for ${nice(key)} updated and verified in scorecards, Entry Log, and Previous Day source.`:(monthlyUpdated?`Saved ${nice(draft.selectedDate)} to reporting date ${nice(key)}. Scorecards, Entry Log, and Previous Day source verified; monthly actuals updated.`:`Saved ${nice(draft.selectedDate)} to reporting date ${nice(key)}. Scorecards, Entry Log, and Previous Day source verified.`),'success');
-  return {saved:true,key,record,monthlyUpdated};
- }catch(error){app.dailyRecords=beforeApp.dailyRecords;app.actuals=beforeApp.actuals;app.manualActualOverrides=beforeApp.manualActualOverrides;app.activeMonth=beforeApp.activeMonth;restoreStorage(beforeStorage);throw error;}
+  app.showToast?.(`${mode==='ocr'?'Imported':'Saved'} ${nice(draft.selectedDate)} to reporting date ${nice(key)}. Scorecards, Entry Log, latest daily actuals, and Previous Day source verified${monthlyUpdated?'; monthly actuals updated':''}.`,'success');
+  return {saved:true,key,record,monthlyUpdated,mode};
+ }catch(error){app.dailyRecords=beforeApp.dailyRecords;app.actuals=beforeApp.actuals;app.manualActualOverrides=beforeApp.manualActualOverrides;app.activeMonth=beforeApp.activeMonth;restoreStorage(beforeStorage);if(archive){try{if(archive.old)await root.ScreenshotArchive.put(archive.old);else await root.ScreenshotArchive.remove(archive.id);}catch(archiveError){console.error(PATCH+' screenshot rollback failed',archiveError);}}throw error;}
 }
-function installHydration(app){
- if(!app||app.__v3236CanonicalHydration)return;
+async function save(earlyDraft){
+ if(running)return;const app=root.appState;if(!app)return;
+ running=true;setBusy(true);
+ try{return await commitDaily(app,earlyDraft);}catch(error){console.error(PATCH,error);app.showToast?.(error?.message||'The daily record could not be committed. The form remains open.','error');return {saved:false,error};}finally{running=false;setBusy(false);}
+}
+function install(app){
+ if(!app||app.__v3237AtomicDailyCommit||!app.__v3210DailyCommitInstalled)return false;
  const load=app.loadSavedStateData;
- if(typeof load==='function')app.loadSavedStateData=function(){const result=load.apply(this,arguments);repairSplit(this);return result;};
+ if(typeof load==='function')app.loadSavedStateData=function(){const result=load.apply(this,arguments);reconcile(this);return result;};
  const render=app.renderDashboard;
- if(typeof render==='function')app.renderDashboard=function(){repairSplit(this);return render.apply(this,arguments);};
- app.__v3236CanonicalHydration=true;repairSplit(app);
+ if(typeof render==='function')app.renderDashboard=function(){reconcile(this);return render.apply(this,arguments);};
+ app.saveDailyRecord=function(){return save(pointerDraft);};
+ app.__v3237AtomicDailyCommit=true;reconcile(app);return true;
 }
-async function onClick(event){
- const target=event.target?.closest?.('#saveDailyRecordBtn');if(!target)return;
- event.preventDefault();event.stopImmediatePropagation();if(running)return;
- const app=root.appState;if(!app)return;
- if(!manualMode(app)){Promise.resolve(app.saveDailyRecord?.()).catch(error=>{console.error(PATCH,error);app.showToast?.(error?.message||'The OCR entry could not be saved.','error');});return;}
- running=true;busy(true);const early=pointerDraft;pointerDraft=null;
- try{await commitManual(app,early);}catch(error){console.error(PATCH,error);app.showToast?.(error?.message||'The manual entry could not be saved. The form remains open.','error');}finally{running=false;busy(false);}
-}
-document.addEventListener('pointerdown',event=>{if(event.target?.closest?.('#saveDailyRecordBtn'))pointerDraft=rawDraft();},true);
-document.addEventListener('click',onClick,true);
-const install=()=>{if(root.appState)installHydration(root.appState);};
-if(document.readyState==='loading')root.addEventListener('DOMContentLoaded',install);else install();
-const timer=root.setInterval(()=>{if(root.appState){root.clearInterval(timer);install();}},25);
-root.SalesTrackerDailyStoreV3236={version:PATCH,records:canonicalRecords,repair:repairSplit,write:writeCanonical,verifyCopies,previousSourceReads};
-root.SalesTrackerManualSaveV3236={version:PATCH,commitManual,reportingDate,verify:verifyCopies,get running(){return running;}};
+document.addEventListener('pointerdown',event=>{if(event.target?.closest?.('#saveDailyRecordBtn,#uploadModal button[onclick*="saveDailyRecord"]'))pointerDraft=rawDraft();},true);
+document.addEventListener('click',event=>{const target=event.target?.closest?.('#saveDailyRecordBtn,#uploadModal button[onclick*="saveDailyRecord"]');if(!target)return;event.preventDefault();event.stopImmediatePropagation();if(!target.id)target.id='saveDailyRecordBtn';const draft=pointerDraft;pointerDraft=null;save(draft);},true);
+function boot(){const timer=root.setInterval(()=>{if(install(root.appState))root.clearInterval(timer);},25);root.setTimeout(()=>{install(root.appState);root.clearInterval(timer);},2500);}
+if(document.readyState==='loading')root.addEventListener('DOMContentLoaded',boot);else boot();
+root.addEventListener('pageshow',()=>install(root.appState));
+root.addEventListener('storage',event=>{if(event.key===STATE_KEY||event.key===HISTORY_KEY)reconcile(root.appState);});
+root.SalesTrackerDailyStoreV3237={version:PATCH,records:canonicalRecords,reconcile,commitCanonical,verifyCopies};
+root.SalesTrackerDailyCommitV3237={version:PATCH,commit:commitDaily,reportingDate,verifyCopies,previousSourceReads,get running(){return running;}};
 })(window);
-</script>
 
+</script>
 </body>
 </html>
